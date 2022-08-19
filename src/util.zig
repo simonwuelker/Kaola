@@ -21,8 +21,8 @@ pub fn count_bits(board_: u64) u6 {
 }
 
 pub fn ls1b_index(board_: u64) u6 {
+   std.debug.assert(board_ != 0); // must contain at least one set bit for the result to make sense
    var board = board_;
-   std.debug.assert(board != 0); // must contain at least one set bit for the result to make sense
    board  ^= board - 1;
    var t32  = @truncate(u32, board) ^ @truncate(u32, board >> 32);
    t32 ^= 0x01C5FC81;
