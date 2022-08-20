@@ -15,7 +15,7 @@ pub fn count_bits(board_: u64) u6 {
     var board = board_;
     var count: u6 = 0;
     while (board != 0): (count += 1){
-        board &= board - 1;
+        pop_ls1b(&board);
     }
     return count;
 }
@@ -29,4 +29,8 @@ pub fn ls1b_index(board_: u64) u6 {
    t32 +=  t32 >> 16;
    t32 -= (t32 >> 8) + 51;
    return LSB_64_table [t32 & 255]; // 0..63
+}
+
+pub fn pop_ls1b(num: *u64) void {
+    num.* &= num.* - 1;
 }

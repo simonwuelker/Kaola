@@ -1,6 +1,7 @@
 const std = @import("std");
 const rand = @import("rand.zig");
-const util = @import("util.zig");
+const bitops = @import("bitops.zig");
+const magics = @import("magics.zig");
 
 const Field = enum(u6) {
     A8, B8, C8, D8, E8, F8, G8, H8,
@@ -43,6 +44,14 @@ const NOT_H_FILE: u64 = 0x7f7f7f7f7f7f7f7f;
 const NOT_AB_FILE: u64 = 0xfcfcfcfcfcfcfcfc;
 /// Bit mask for masking off the G and H files
 const NOT_GH_FILE: u64 = 0x3f3f3f3f3f3f3f3f;
+/// Bit mask for masking the A file
+const A_FILE: u64 = 0x101010101010101;
+/// Bit mask for masking the first rank
+const EIGTH_RANK: u64 = 0xff;
+/// Bit mask for masking off the outer files
+const NOT_AH_FILE: u64 = 0x7e7e7e7e7e7e7e7e;
+/// Bit mask for masking off the outer ranks
+const NOT_FIRST_OR_EIGTH_RANK: u64 = 0xffffffffffff00;
 
 fn print_bitboard(board: u64) void {
     var i: u6 = 0;
@@ -59,6 +68,53 @@ fn print_bitboard(board: u64) void {
         std.debug.print("\n", .{});
     }
     std.debug.print("\n   a b c d e f g h\n", .{});
+}
+
+/// this function could return an u3
+fn bitboard_distance_to_edge(field: u6, shift: i5) u6 {
+    // reminder: 
+    // field % 8 = file
+    // field / 8 = rank
+    return switch (shift) {
+        1 => @as(u6, 7) - field % 8,
+        -1 => field % 8,
+        8 => @as(u6, 7) - field / 8,
+        -8 => field / 8,
+        9 => std.math.min(@as(u6, 7) - field % 8, @as(u6, 7) - field / 8),
+        -7 => std.math.min(@as(u6, 7) - field % 8, field / 8),
+        -9 => std.math.min(field % 8, field / 8),
+        7 => std.math.min(field % 8, @as(u6, 7) - field / 8),
+        else => unreachable,
+    };
+}
+
+fn attacks_in_direction(start: u6, signed_shift: i5, blocked: u64) u64 {
+    const max_moves = bitboard_distance_to_edge(start, signed_shift);
+    const negative_shift = if (signed_shift < 0) true else false;
+    const shift: u5 = std.math.absCast(signed_shift);
+    var field = start;
+    var attack_mask: u64 = 0;
+    var i: u3 = 0;
+    while (i < max_moves and (blocked >> field) & 1 == 0): (i += 1) {
+        if (negative_shift) field -= shift else field += shift;
+        attack_mask |= @as(u64, 1) << field;
+    }
+    return attack_mask;
+}
+
+fn mask_in_direction(start: u6, signed_shift: i5) u64 {
+    const max_moves = bitboard_distance_to_edge(start, signed_shift);
+    if (max_moves == 0) return 0;
+    const negative_shift = if (signed_shift < 0) true else false;
+    const shift: u5 = std.math.absCast(signed_shift);
+    var field = start;
+    var mask: u64 = 0;
+    var i: u3 = 0;
+    while (i < max_moves - 1): (i += 1) {
+        if (negative_shift) field -= shift else field += shift;
+        mask |= @as(u64, 1) << field;
+    }
+    return mask;
 }
 
 fn pawn_attacks(field: u6, is_white: bool) u64 {
@@ -97,197 +153,54 @@ fn knight_attacks(field: u6) u64 {
 /// Determine the positions whose occupancy is relevant to the moves a bishop can make
 fn bishop_relevant_positions(field: u6) u64 {
     var board: u64 = 0;
-    var piece_file = field % 8;
-    var piece_rank = field / 8;
-
-    var file = piece_file;
-    var rank = piece_rank;
-    while ((file > 0) and (rank > 0)) {
-        set_bit(&board, @intToEnum(Field, rank * 8 + file));
-        file -= 1;
-        rank -= 1;
-    }
-
-    file = piece_file;
-    rank = piece_rank;
-    while ((file < 7) and (rank < 7)) {
-        set_bit(&board, @intToEnum(Field, rank * 8 + file));
-        file += 1;
-        rank += 1;
-    }
-
-    file = piece_file;
-    rank = piece_rank;
-    while ((file < 7) and (rank > 0)) {
-        set_bit(&board, @intToEnum(Field, rank * 8 + file));
-        file += 1;
-        rank -= 1;
-    }
-
-    file = piece_file;
-    rank = piece_rank;
-    while ((file > 0) and (rank < 7)) {
-        set_bit(&board, @intToEnum(Field, rank * 8 + file));
-        file -= 1;
-        rank += 1;
-    }
-    // unset the original bishop bit - makes the code simpler and efficiency isn't that important,
-    // this will only be called at startup :^)
-    board ^= @as(u64, 1) << field;
+    board |= mask_in_direction(field, 7);
+    board |= mask_in_direction(field, -7);
+    board |= mask_in_direction(field, 9);
+    board |= mask_in_direction(field, -9);
     return board;
 }
 
 /// Determine the positions whose occupancy is relevant to the moves a rook can make
 fn rook_relevant_positions(field: u6) u64 {
     var board: u64 = 0;
-    var piece_file = field % 8;
-    var piece_rank = field / 8;
-
-    var file = piece_file;
-    while (file > 0): (file -= 1) {
-        set_bit(&board, @intToEnum(Field, piece_rank * 8 + file));
-    }
-
-    file = piece_file;
-    while (file < 7): (file += 1) {
-        set_bit(&board, @intToEnum(Field, piece_rank * 8 + file));
-    }
-
-    var rank = piece_rank;
-    while (rank > 0): (rank -= 1) {
-        set_bit(&board, @intToEnum(Field, rank * 8 + piece_file));
-    }
-
-    rank = piece_rank;
-    while (rank < 7): (rank += 1) {
-        set_bit(&board, @intToEnum(Field, rank * 8 + piece_file));
-    }
-
-
-    // unset the original rook bit - makes the code simpler and efficiency isn't that important,
-    // this will only be called at startup :^)
+    board |= (A_FILE << field % 8) & NOT_FIRST_OR_EIGTH_RANK;
+    board |= (EIGTH_RANK << (field & ~@as(u6, 7))) & NOT_AH_FILE;
     board ^= @as(u64, 1) << field;
     return board;
 }
 
 fn generate_bishop_attacks(field: u6, blocked: u64) u64 {
     var board: u64 = 0;
-    var piece_file = field % 8;
-    var piece_rank = field / 8;
-
-    var file = piece_file;
-    var rank = piece_rank;
-    while ((file >= 0) and (rank >= 0)) {
-        const index = rank * 8 + file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (file == 0 or rank == 0 or blocked >> index & 1 != 0) {
-            break;
-        }
-        file -= 1;
-        rank -= 1;
-    }
-
-    file = piece_file;
-    rank = piece_rank;
-    while ((file <= 7) and (rank <= 7)) {
-        const index = rank * 8 + file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (blocked >> index & 1 != 0) {
-            break;
-        }
-        file += 1;
-        rank += 1;
-    }
-
-    file = piece_file;
-    rank = piece_rank;
-    while ((file <= 7) and (rank >= 0)) {
-        const index = rank * 8 + file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (rank == 0 or blocked >> index & 1 != 0) {
-            break;
-        }
-        file += 1;
-        rank -= 1;
-    }
-
-    file = piece_file;
-    rank = piece_rank;
-    while ((file >= 0) and (rank <= 7)) {
-        const index = rank * 8 + file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (file == 0 or blocked >> index & 1 != 0) {
-            break;
-        }
-        file -= 1;
-        rank += 1;
-    }
-    // unset the original bishop bit - makes the code simpler and efficiency isn't that important,
-    // this will only be called at startup :^)
-    board ^= @as(u64, 1) << field;
+    board |= attacks_in_direction(field, 7, blocked);
+    board |= attacks_in_direction(field, -7, blocked);
+    board |= attacks_in_direction(field, 9, blocked);
+    board |= attacks_in_direction(field, -9, blocked);
     return board;
 }
 
 fn generate_rook_attacks(field: u6, blocked: u64) u64 {
     var board: u64 = 0;
-    var piece_file = field % 8;
-    var piece_rank = field / 8;
-
-    var file = piece_file;
-    while (true): (file -= 1) {
-        const index = piece_rank * 8 + file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (blocked & @as(u64, 1) << index != 0 or file == 0) {
-            break;
-        }
-    }
-
-    file = piece_file;
-    while (true): (file += 1) {
-        const index = piece_rank * 8 + file;
-        set_bit(&board, @intToEnum(Field, piece_rank * 8 + file));
-        if (blocked & @as(u64, 1) << index != 0 or file == 7) {
-            break;
-        }
-    }
-
-    var rank = piece_rank;
-    while (true): (rank -= 1) {
-        const index = rank * 8 + piece_file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (blocked & @as(u64, 1) << index != 0 or rank == 0) {
-            break;
-        }
-    }
-
-    rank = piece_rank;
-    while (true): (rank += 1) {
-        const index = rank * 8 + piece_file;
-        set_bit(&board, @intToEnum(Field, index));
-        if (blocked & @as(u64, 1) << index != 0 or rank == 7) {
-            break;
-        }
-    }
-
-
-    // unset the original rook bit - makes the code simpler and efficiency isn't that important,
-    // this will only be called at startup :^)
-    board ^= @as(u64, 1) << field;
+    board |= attacks_in_direction(field, 8, blocked);
+    board |= attacks_in_direction(field, -8, blocked);
+    board |= attacks_in_direction(field, 1, blocked);
+    board |= attacks_in_direction(field, -1, blocked);
     return board;
 }
 
-fn populate_occupancy_map(index: u64, attack_map_: u64, num_bits: u6) u64 {
+fn populate_occupancy_map(index_: u64, attack_map_: u64, num_bits: u6) u64 {
+    var index = index_;
     var attack_map: u64 = attack_map_;
     var occupied: u64 = 0;
     var count: u6 = 0;
     while (count < num_bits): (count += 1) {
         // continously pop the ls1b
-        var square: u6 = util.ls1b_index(attack_map);
+        var square: u6 = bitops.ls1b_index(attack_map);
         attack_map ^= @as(u64, 1) << square;
 
-        if (index & @as(u64, 1) << count != 0) {
+        if (index & 1 != 0) {
             occupied |= @as(u64, 1) << square;
         }
+        index >>= 1;
     }
     return occupied;
 }
@@ -298,7 +211,7 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
     const occupancy_mask = if (bishop) bishop_relevant_positions(square) else rook_relevant_positions(square);
     const num_blocking_combinations: u64 = @as(u64, 1) << num_relevant_positions;
 
-    // populate attack/occupancy map
+    // populate attack/occupancy tables
     var i: u64 = 0;
     while (i < num_blocking_combinations): (i += 1) {
         occupancies[i] = populate_occupancy_map(i, occupancy_mask, num_relevant_positions);
@@ -307,17 +220,16 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
 
     // find magic number
     var rng = rand.Rand64.new();
-    var hash_buckets: [4096]u64 = undefined;
-    std.debug.print("searching", .{});
     search_magic: while(true) {
         // random number with a low number of set bits
-        const magic: u64 = rng.next() | rng.next() | rng.next();
+        const magic: u64 = rng.next() & rng.next() & rng.next();
 
         // skip bad magic numbers
-        if (util.count_bits((occupancy_mask *% magic) & 0xFF00000000000000) < 6) {
+        if (bitops.count_bits((occupancy_mask *% magic) >> 56) < 6) {
             continue;
         }
 
+        var hash_buckets: [4096]u64 = [1]u64 { 0 } ** 4096;
         std.mem.set(u64, hash_buckets[0..hash_buckets.len], 0);
 
         var index: u64 = 0;
@@ -329,6 +241,7 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
             } else if (hash_buckets[hash] != attacks[index]) {
                 // hash collision with different attacks, bad magic value
                 // note that we do allow hash collisions as long as they produce the same attack pattern
+                // std.debug.print("collission at {d}\n", .{index});
                 continue :search_magic;
             }
         }
@@ -338,52 +251,60 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
     }
 }
 
-var bishop_magic_numbers: [64]u64 = undefined;
 var bishop_attack_table: [64][512]u64 = undefined;
-var rook_magic_numbers: [64]u64 = undefined;
+var bishop_blocking_positions: [64]u64 = undefined;
 var rook_attack_table: [64][4096]u64 = undefined;
+var rook_blocking_positions: [64]u64 = undefined;
 
 fn init_magic_numbers() void {
     var square: u6 = 0;
     while (square < 63) : (square += 1) {
-        std.debug.print("searching magic for square {d}\n", .{square});
-        bishop_magic_numbers[square] = find_magic_number(square, BISHOP_RELEVANT_BITS[square], true);
-        rook_magic_numbers[square] = find_magic_number(square, ROOK_RELEVANT_BITS[square], false);
+        // bishop_magic_numbers[square] = find_magic_number(square, BISHOP_RELEVANT_BITS[square], true);
+        // rook_magic_numbers[square] = find_magic_number(square, ROOK_RELEVANT_BITS[square], false);
+        std.debug.print("0x{x}\n", .{find_magic_number(square, ROOK_RELEVANT_BITS[square], false)});
     }
+    // TODO: find out how to do this properly in zig
+    std.debug.print("0x{x}\n", .{find_magic_number(0, ROOK_RELEVANT_BITS[0], false)});
 }
 
 fn init_slider_attacks() void {
     var square: u6 = 0;
     while (square < 63): (square += 1) {
         const relevant_positions = bishop_relevant_positions(square);
+        bishop_blocking_positions[square] = relevant_positions;
         const num_positions: u6 = BISHOP_RELEVANT_BITS[square];
         var index: u64 = 0;
         while(index < @as(u64, 1) << num_positions): (index += 1) {
             const blocked: u64 = populate_occupancy_map(index, relevant_positions, num_positions);
-            const hash = (blocked *% bishop_magic_numbers[square]) >> (~num_positions + 1);
+            const hash = (blocked *% magics.BISHOP_MAGIC_NUMBERS[square]) >> (~num_positions + 1);
             bishop_attack_table[square][hash] = generate_bishop_attacks(square, blocked);
         }
     }
     square = 0;
     while (square < 63): (square += 1) {
         const relevant_positions = rook_relevant_positions(square);
+        rook_blocking_positions[square] = relevant_positions;
         const num_positions: u6 = ROOK_RELEVANT_BITS[square];
         var index: u64 = 0;
         while(index < @as(u64, 1) << num_positions): (index += 1) {
             const blocked: u64 = populate_occupancy_map(index, relevant_positions, num_positions);
-            const hash = (blocked *% rook_magic_numbers[square]) >> (~num_positions + 1);
+            const hash = (blocked *% magics.ROOK_MAGIC_NUMBERS[square]) >> (~num_positions + 1);
             rook_attack_table[square][hash] = generate_rook_attacks(square, blocked);
         }
     }
 }
 
 fn bishop_attacks(square: u6, blocked: u64) u64 {
-    const hash = (blocked *% bishop_magic_numbers[square]) >> (~BISHOP_RELEVANT_BITS[square] + 1);
+    // mask off the pieces we don't care about
+    const relevant_blocks = blocked & bishop_blocking_positions[square];
+    const hash = (relevant_blocks *% magics.BISHOP_MAGIC_NUMBERS[square]) >> (~BISHOP_RELEVANT_BITS[square] + 1);
     return bishop_attack_table[square][hash];
 }
 
 fn rook_attacks(square: u6, blocked: u64) u64 {
-    const hash = (blocked *% rook_magic_numbers[square]) >> (~ROOK_RELEVANT_BITS[square] + 1);
+    // mask off the pieces we don't care about
+    const relevant_blocks = blocked & rook_blocking_positions[square];
+    const hash = (relevant_blocks *% magics.ROOK_MAGIC_NUMBERS[square]) >> (~ROOK_RELEVANT_BITS[square] + 1);
     return rook_attack_table[square][hash];
 }
 
@@ -392,12 +313,15 @@ fn set_bit(board: *u64, index: Field) void {
 }
 
 pub fn main() !void {
-    init_magic_numbers();
+    // init_magic_numbers();
     init_slider_attacks();
 
+
     var blocked: u64 = 0;
-    set_bit(&blocked, Field.E7);
-    print_bitboard(generate_rook_attacks(@enumToInt(Field.E4), blocked));
-    print_bitboard(rook_attacks(@enumToInt(Field.E4), blocked));
+    set_bit(&blocked, Field.C4);
+    set_bit(&blocked, Field.C6);
+    set_bit(&blocked, Field.F3);
+    print_bitboard(generate_bishop_attacks(@enumToInt(Field.E4), blocked));
+    print_bitboard(bishop_attacks(@enumToInt(Field.E4), blocked));
     // print_bitboard(rook_relevant_positions(@enumToInt(Field.E4)));
 }
