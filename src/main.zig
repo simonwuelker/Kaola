@@ -2,6 +2,7 @@ const std = @import("std");
 const rand = @import("rand.zig");
 const bitops = @import("bitops.zig");
 const magics = @import("magics.zig");
+const Board = @import("board.zig").Board;
 
 const Field = enum(u6) {
     A8, B8, C8, D8, E8, F8, G8, H8,
@@ -315,13 +316,6 @@ fn set_bit(board: *u64, index: Field) void {
 pub fn main() !void {
     // init_magic_numbers();
     init_slider_attacks();
-
-
-    var blocked: u64 = 0;
-    set_bit(&blocked, Field.C4);
-    set_bit(&blocked, Field.C6);
-    set_bit(&blocked, Field.F3);
-    print_bitboard(generate_bishop_attacks(@enumToInt(Field.E4), blocked));
-    print_bitboard(bishop_attacks(@enumToInt(Field.E4), blocked));
-    // print_bitboard(rook_relevant_positions(@enumToInt(Field.E4)));
+    var board = Board.starting_position();
+    board.print();
 }
