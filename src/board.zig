@@ -1,23 +1,23 @@
 const std = @import("std");
 
-const WHITE = 0;
-const BLACK = 1;
-const BOTH = 2;
-const PAWN = 0;
-const KNIGHT = 1;
-const BISHOP = 2;
-const ROOK = 3;
-const QUEEN = 4;
-const KING = 5;
+pub const WHITE = 0;
+pub const BLACK = 1;
+pub const BOTH = 2;
+pub const PAWN = 0;
+pub const KNIGHT = 1;
+pub const BISHOP = 2;
+pub const ROOK = 3;
+pub const QUEEN = 4;
+pub const KING = 5;
 
 /// Bit indicating whether or not white can castle kingside
-const WHITE_KINGSIDE: u4 = 1;
+pub const WHITE_KINGSIDE: u4 = 1;
 /// Bit indicating whether or not white can castle queenside
-const WHITE_QUEENSIDE: u4 = 2;
+pub const WHITE_QUEENSIDE: u4 = 2;
 /// Bit indicating whether or not black can castle kingside
-const BLACK_KINGSIDE: u4 = 4;
+pub const BLACK_KINGSIDE: u4 = 4;
 /// Bit indicating whether or not black can castle queenside
-const BLACK_QUEENSIDE: u4 = 8;
+pub const BLACK_QUEENSIDE: u4 = 8;
 
 /// Errors that can occur while parsing a FEN string
 const FenParseError = error {
@@ -29,6 +29,13 @@ const FenParseError = error {
     InvalidHalfMoveCounter,
     InvalidFullMoveCounter,
 };
+
+pub fn square_name(square: u6) [2]u8 {
+    var name: [2]u8 = undefined;
+    name[0] = @intCast(u8, square % 8) + 'a';
+    name[1] = '8' - @intCast(u8, square / 8);
+    return name;
+}
 
 pub const Board = struct {
     position: [2][6]u64,
@@ -69,7 +76,7 @@ pub const Board = struct {
                     'b' => bitboard_position[BLACK][BISHOP] |= @as(u64, 1) << (rank * 8 + file),
                     'P' => bitboard_position[WHITE][PAWN] |= @as(u64, 1) << (rank * 8 + file),
                     'p' => bitboard_position[BLACK][PAWN] |= @as(u64, 1) << (rank * 8 + file),
-                    '1'...'8' => file += @intCast(u3, c - 0x31),
+                    '1'...'8' => file += @intCast(u3, c - '1'),
                     else => return FenParseError.InvalidPosition,
                 }
                 file += 1;
