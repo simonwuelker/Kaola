@@ -1,4 +1,6 @@
 const std = @import("std");
+const bitboard = @import("bitboard.zig");
+const bitops = @import("bitops.zig");
 
 pub const WHITE = 0;
 pub const BLACK = 1;
@@ -187,5 +189,61 @@ pub const Board = struct {
             std.debug.print("\n", .{});
         }
         std.debug.print("\n   a b c d e f g h\n", .{});
+    }
+
+    /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
+    /// Note that the opponent king is effectively considered to be nonexistent, as he cannot move
+    /// to squares that are x-rayed by an opponent slider piece.
+    /// So result is "a bitboard marking all positions that the opponent king cannot move to".
+    pub fn king_unsafe_squares(self: *Board, by_white: bool)  u64 {
+        var attacked: u64 = 0;
+        const opponent_color: u2 = if (by_white) WHITE else BLACK;
+        const my_color: u2 = if (!by_white) WHITE else BLACK;
+        const ALL_WITHOUT_KING = self.occupancies[BOTH] ^ self.occupancies[my_color][KING];
+
+        // pawns
+        if (by_white) {
+            attacked |= bitboard.white_pawn_attacks_left(self.position[opponent_color][PAWN]);
+            attacked |= bitboard.white_pawn_attacks_right(self.position[opponent_color][PAWN]);
+        } else {
+            attacked |= bitboard.black_pawn_attacks_left(self.position[opponent_color][PAWN]);
+            attacked |= bitboard.black_pawn_attacks_right(self.position[opponent_color][PAWN]);
+        }
+
+        // knights
+        var knights = self.position[opponent_color][KNIGHT];
+        while (knights != 0): (bitops.pop_ls1b(&knights)) {
+            const index = bitops.ls1b_index(knights);
+            attacked |= bitboard.knight_attacks(index);
+        }
+
+        // bishops
+        var bishops = self.position[opponent_color][BISHOP];
+        while (bishops != 0): (bitops.pop_ls1b(&bishops)) {
+            const index = bitops.ls1b_index(bishops);
+            attacked |= bitboard.bishop_attacks(index, ALL_WITHOUT_KING);
+        }
+
+        // rooks
+        var rooks = self.position[opponent_color][ROOK];
+        while (rooks != 0): (bitops.pop_ls1b(&rooks)) {
+            const index = bitops.ls1b_index(rooks);
+            attacked |= bitboard.rook_attacks(index, ALL_WITHOUT_KING);
+        }
+
+        // queens
+        var queens = self.position[opponent_color][QUEEN];
+        while (queens != 0): (bitops.pop_ls1b(&queens)) {
+            const index = bitops.ls1b_index(queens);
+            attacked |= bitboard.queen_attacks(index, ALL_WITHOUT_KING);
+        }
+
+        // king(s)
+        var kings = self.position[opponent_color][KING];
+        while (kings != 0): (bitops.pop_ls1b(&kings)) {
+            const index = bitops.ls1b_index(kings);
+            attacked |= bitboard.king_attacks(index);
+        }
+        return attacked;
     }
 };

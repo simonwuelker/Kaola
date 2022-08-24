@@ -1,7 +1,7 @@
 # Files
 | Filename | Contents | 
 | -------- | ----------- |
-| [`bitboardops.zig`](https://github.com/Wuelle/zigchess/blob/main/src/bitboardops.zig) | (magic) bitboards, attack tables |
+| [`bitboard.zig`](https://github.com/Wuelle/zigchess/blob/main/src/bitboard.zig) | (magic) bitboards, attack tables |
 | [`bitops.zig`](https://github.com/Wuelle/zigchess/blob/main/src/bitops.zig) | Utility functions for bit manipulation (`count_bits`, `get_ls1b_index` etc...) |
 | [`board.zig`](https://github.com/Wuelle/zigchess/blob/main/src/board.zig) | Game State, FEN Parsing |
 | [`magics.zig`](https://github.com/Wuelle/zigchess/blob/main/src/magics.zig) | Hardcoded Bishop/Rook magic numbers |

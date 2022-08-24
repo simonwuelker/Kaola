@@ -1,4 +1,5 @@
 const std = @import("std");
+const bitboard = @import("bitboard.zig");
 
 const LSB_64_table = [_]u6 {
    22,  0,  0,  0, 30,  0,  0, 38, 18,  0, 16, 15, 17,  0, 46,  9, 19,  8,  7, 10,
@@ -10,15 +11,6 @@ const LSB_64_table = [_]u6 {
     0, 52,  0,  0, 26,  0, 43, 34, 25, 23, 24, 33, 31, 32, 42, 39, 40, 51, 41, 14,
     0, 49, 47, 48,  0, 50,  6,  0,  0, 62,  0,  0,  0, 54
 };
-
-pub fn count_bits(board_: u64) u6 {
-    var board = board_;
-    var count: u6 = 0;
-    while (board != 0): (count += 1){
-        pop_ls1b(&board);
-    }
-    return count;
-}
 
 pub fn ls1b_index(board_: u64) u6 {
    std.debug.assert(board_ != 0); // must contain at least one set bit for the result to make sense

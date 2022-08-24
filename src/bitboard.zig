@@ -59,20 +59,16 @@ const NOT_AH_FILE: u64 = 0x7e7e7e7e7e7e7e7e;
 /// Bit mask for masking off the outer ranks
 const NOT_FIRST_OR_EIGTH_RANK: u64 = 0xffffffffffff00;
 
-/// this function could return an u3
-fn bitboard_distance_to_edge(field: u6, shift: i5) u6 {
-    // reminder: 
-    // field % 8 = file
-    // field / 8 = rank
+fn bitboard_distance_to_edge(field: u6, shift: i5) u3 {
     return switch (shift) {
-        1 => @as(u6, 7) - field % 8,
-        -1 => field % 8,
-        8 => @as(u6, 7) - field / 8,
-        -8 => field / 8,
-        9 => std.math.min(@as(u6, 7) - field % 8, @as(u6, 7) - field / 8),
-        -7 => std.math.min(@as(u6, 7) - field % 8, field / 8),
-        -9 => std.math.min(field % 8, field / 8),
-        7 => std.math.min(field % 8, @as(u6, 7) - field / 8),
+        1 => @as(u3, 7) - file(field),
+        -1 => file(field),
+        8 => @as(u3, 7) - rank(field),
+        -8 => rank(field),
+        9 => std.math.min(@as(u3, 7) - file(field), @as(u6, 7) - rank(field)),
+        -7 => std.math.min(@as(u3, 7) - file(field), rank(field)),
+        -9 => std.math.min(file(field), rank(field)),
+        7 => std.math.min(file(field), @as(u3, 7) - rank(field)),
         else => unreachable,
     };
 }
@@ -108,30 +104,37 @@ fn mask_in_direction(start: u6, signed_shift: i5) u64 {
 
 /// Compute the left attacks for a set of white pawns
 /// (Left from white's POV)
-pub fn white_pawn_attacks_left(board: u64) u64 {
+pub fn white_pawn_attacks_left(board: u64) callconv (.Inline) u64 {
     return (board & NOT_A_FILE) >> 9;
 }
 
 /// Compute the right attacks for a set of white pawns
 /// (Left from white's POV)
-pub fn white_pawn_attacks_right(board: u64) u64 {
+pub fn white_pawn_attacks_right(board: u64) callconv (.Inline) u64 {
     return (board & NOT_H_FILE) >> 7;
 }
 
 /// Compute the left attacks for a set of black pawns
 /// (Left from white's POV)
-pub fn black_pawn_attacks_left(board: u64) u64 {
+pub fn black_pawn_attacks_left(board: u64) callconv (.Inline) u64 {
     return (board & NOT_A_FILE) << 7;
 }
 
 /// Compute the right attacks for a set of black pawns
 /// (Left from white's POV)
-pub fn black_pawn_attacks_right(board: u64) u64 {
+pub fn black_pawn_attacks_right(board: u64) callconv (.Inline) u64 {
     return (board & NOT_H_FILE) << 9;
 }
 
-pub fn king_attacks(field: u6) u64 {
-    const board: u64 = 1 << field;
+pub fn white_pawn_attacks(board: u64) callconv (.Inline) u64 {
+    return white_pawn_attacks_left(board) | white_pawn_attacks_right(board);
+}
+
+pub fn black_pawn_attacks(board: u64) callconv (.Inline) u64 {
+    return black_pawn_attacks_left(board) | black_pawn_attacks_right(board);
+}
+
+pub fn king_attacks(board: u64) u64 {
     return ((board & NOT_A_FILE) >> 1) // left
         | ((board & NOT_H_FILE) << 1) // right
         | (board << 8) // down
@@ -142,8 +145,13 @@ pub fn king_attacks(field: u6) u64 {
         | ((board & NOT_A_FILE) << 7); // down left
 }
 
-pub fn knight_attacks(field: u6) u64 {
-    const board: u64 = 1 << field;
+pub fn single_knight_attack(field: u6) u64 {
+    const board: u64 = @as(u64, 1) << field;
+    return knight_attacks(board);
+}
+
+/// Take a bitboard of knights and produce a bitboard marking their attacks
+pub fn knight_attacks(board: u64) u64 {
     return ((board & NOT_A_FILE) >> 17) // up up left
         | ((board & NOT_H_FILE) >> 15) // up up right
         | ((board & NOT_GH_FILE) >> 6) // up right right
@@ -229,7 +237,7 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
         const magic: u64 = rng.next() & rng.next() & rng.next();
 
         // skip bad magic numbers
-        if (bitops.count_bits((occupancy_mask *% magic) >> 56) < 6) {
+        if (@popCount(u64, (occupancy_mask *% magic) >> 56) < 6) {
             continue;
         }
 
@@ -314,4 +322,46 @@ pub fn rook_attacks(square: u6, blocked: u64) u64 {
 
 pub fn queen_attacks(square: u6, blocked: u64) u64 {
     return bishop_attacks(square, blocked) | rook_attacks(square, blocked);
+}
+
+/// A lookup table containing the paths between any two squares on the board.
+/// Source square is included, target square is not.
+/// The table should be indexed like this: `PATH_BETWEEN_SQUARES[source][target]`.
+pub var PATH_BETWEEN_SQUARES: [64][64]u64 = undefined;
+
+pub fn init_paths_between_squares() void {
+    var source: u6 = 0;
+    while (true): (source += 1) {
+        var target: u6 = 0;
+        while (true): (target += 1) {
+            if (source == target) PATH_BETWEEN_SQUARES[source][target] = 0;
+
+            const blocked = @as(u64, 1) << source | @as(u64, 1) << target;
+            // if horizontally aligned
+            if (rank(source) == rank(target) or file(source) == file(target)) {
+                PATH_BETWEEN_SQUARES[source][target] = rook_attacks(source, blocked) & rook_attacks(target, blocked);
+                PATH_BETWEEN_SQUARES[source][target] ^= @as(u64, 1) << source;
+            }
+            // if diagonally aligned (if the absolute difference between their ranks is the same as their files
+            else if (std.math.max(rank(source), rank(target)) - std.math.min(rank(source), rank(target)) ==
+                    std.math.max(file(source), file(target)) - std.math.min(file(source), file(target))) {
+                PATH_BETWEEN_SQUARES[source][target] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
+                PATH_BETWEEN_SQUARES[source][target] ^= @as(u64, 1) << source;
+            } else {
+                // no straight path => 0
+                PATH_BETWEEN_SQUARES[source][target] = 0;
+            }
+            if (target == 63) break;
+        }
+
+        if (source == 63) break;
+    }
+}
+
+pub fn file(square: u6) callconv(.Inline) u3 {
+    return @intCast(u3, square & 0b111);
+}
+
+pub fn rank(square: u6) callconv(.Inline) u3 {
+    return @intCast(u3, square >> 3);
 }

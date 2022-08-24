@@ -1,5 +1,5 @@
 const std = @import("std");
-const bitboardops = @import("bitboardops.zig");
+const bitboard = @import("bitboard.zig");
 const Board = @import("board.zig").Board;
 const movegen = @import("movegen.zig");
 
@@ -15,12 +15,19 @@ const Field = enum(u6) {
 };
 
 
-pub fn main() !void {
+pub fn init() void {
     // init_magic_numbers();
-    bitboardops.init_slider_attacks();
-    var board = try Board.from_fen("r3k2r/pppppPpp/8/8/8/3p4/PPPPPPpp/R3KB1R w KQkq - 0 1");
-    board.white_to_move = false;
+    bitboard.init_slider_attacks();
+    bitboard.init_paths_between_squares(); // depends on initialized slider attacks
+}
 
-    board.print();
-    movegen.generate_moves(board);
+pub fn main() !void {
+    init();
+    // bitboard.print_bitboard(bitboard.PATH_BETWEEN_SQUARES[@enumToInt(Field.B3)][@enumToInt(Field.G8)]);
+    var board = try Board.from_fen("8/8/5q2/8/8/2K5/8/8 w - - 99 50");
+    bitboard.print_bitboard(movegen.generate_checkmask(board));
+    // const bb = board.attacked_squares(true);
+    // board.print();
+    // bitboard.print_bitboard(bb);
+    // movegen.generate_moves(board);
 }
