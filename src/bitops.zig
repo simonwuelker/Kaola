@@ -12,6 +12,7 @@ const LSB_64_table = [_]u6 {
     0, 49, 47, 48,  0, 50,  6,  0,  0, 62,  0,  0,  0, 54
 };
 
+/// Return the index of the least-significant set bit in a number
 pub fn ls1b_index(board_: u64) u6 {
    std.debug.assert(board_ != 0); // must contain at least one set bit for the result to make sense
    var board = board_;
@@ -23,6 +24,31 @@ pub fn ls1b_index(board_: u64) u6 {
    return LSB_64_table [t32 & 255]; // 0..63
 }
 
+/// Unset the least-significant set bit in a given number
 pub fn pop_ls1b(num: *u64) void {
     num.* &= num.* - 1;
+}
+
+test "ls1b index" {
+    const expectEqual = std.testing.expectEqual;
+    var x: u64 = 0b1010100101010001000100101111010101010101110101101101010101111011;
+    var shift: u6 = 0;
+
+    while (shift < 63): (shift += 1) {
+        try expectEqual(shift, ls1b_index(x << shift));
+    }
+}
+
+test "pop ls1b" {
+    const expectEqual = std.testing.expectEqual;
+    var x: u64 = ~@as(u64, 0);
+    var count: u6 = 0;
+
+    while (count < 63): (count += 1) {
+        const expected = ~@as(u64, 0) >> count << count; // inefficient but intuitive way to pop ls1b
+        try expectEqual(expected, x);
+        pop_ls1b(&x);
+    }
+
+
 }

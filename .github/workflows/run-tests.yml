@@ -1,0 +1,14 @@
+name: Build and run tests
+on: [push]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{matrix.os}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: 0.9.1 # The default is 0.5.0
+      - run: zig build test

@@ -3,18 +3,6 @@ const bitboard = @import("bitboard.zig");
 const Board = @import("board.zig").Board;
 const movegen = @import("movegen.zig");
 
-const Field = enum(u6) {
-    A8, B8, C8, D8, E8, F8, G8, H8,
-    A7, B7, C7, D7, E7, F7, G7, H7,
-    A6, B6, C6, D6, E6, F6, G6, H6,
-    A5, B5, C5, D5, E5, F5, G5, H5,
-    A4, B4, C4, D4, E4, F4, G4, H4,
-    A3, B3, C3, D3, E3, F3, G3, H3,
-    A2, B2, C2, D2, E2, F2, G2, H2,
-    A1, B1, C1, D1, E1, F1, G1, H1,
-};
-
-
 pub fn init() void {
     // init_magic_numbers();
     bitboard.init_slider_attacks();
@@ -30,4 +18,24 @@ pub fn main() !void {
     // board.print();
     // bitboard.print_bitboard(bb);
     // movegen.generate_moves(board);
+    var c: u6 = 0;
+    while (true) {
+        c += 1;
+    }
+}
+
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
+    @setCold(true);
+    const stderr = std.io.getStdErr().writer();
+    stderr.print("The engine panicked, this is a bug.\nPlease file an issue at https://github.com/Wuelle/zigchess, including the debug information below.\nThanks ^_^\n", .{}) catch std.os.abort();
+    const first_trace_addr = @returnAddress();
+    std.debug.panicImpl(error_return_trace, first_trace_addr, msg);
+}
+
+test {
+    init(); // setup for tests
+
+    // reference other tests in here
+    _ = @import("movegen.zig");
+    _ = @import("bitops.zig");
 }
