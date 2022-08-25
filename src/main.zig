@@ -13,15 +13,12 @@ pub fn main() !void {
     init();
     // bitboard.print_bitboard(bitboard.PATH_BETWEEN_SQUARES[@enumToInt(Field.B3)][@enumToInt(Field.G8)]);
     var board = try Board.from_fen("8/8/5q2/8/8/2K5/8/8 w - - 99 50");
+    board.print();
     bitboard.print_bitboard(movegen.generate_checkmask(board));
     // const bb = board.attacked_squares(true);
     // board.print();
     // bitboard.print_bitboard(bb);
     // movegen.generate_moves(board);
-    var c: u6 = 0;
-    while (true) {
-        c += 1;
-    }
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {

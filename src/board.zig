@@ -1,3 +1,5 @@
+//! Defines the state of a chess board including a FEN parser
+
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
 const bitops = @import("bitops.zig");

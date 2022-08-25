@@ -1,3 +1,6 @@
+//! Contains regular and magic bitboards 
+//! as well as attack generation code
+
 const std = @import("std");
 const bitops = @import("bitops.zig");
 const rand = @import("rand.zig");
@@ -104,33 +107,33 @@ fn mask_in_direction(start: u6, signed_shift: i5) u64 {
 
 /// Compute the left attacks for a set of white pawns
 /// (Left from white's POV)
-pub fn white_pawn_attacks_left(board: u64) callconv (.Inline) u64 {
+pub inline fn white_pawn_attacks_left(board: u64) u64 {
     return (board & NOT_A_FILE) >> 9;
 }
 
 /// Compute the right attacks for a set of white pawns
 /// (Left from white's POV)
-pub fn white_pawn_attacks_right(board: u64) callconv (.Inline) u64 {
+pub inline fn white_pawn_attacks_right(board: u64) u64 {
     return (board & NOT_H_FILE) >> 7;
 }
 
 /// Compute the left attacks for a set of black pawns
 /// (Left from white's POV)
-pub fn black_pawn_attacks_left(board: u64) callconv (.Inline) u64 {
+pub inline fn black_pawn_attacks_left(board: u64) u64 {
     return (board & NOT_A_FILE) << 7;
 }
 
 /// Compute the right attacks for a set of black pawns
 /// (Left from white's POV)
-pub fn black_pawn_attacks_right(board: u64) callconv (.Inline) u64 {
+pub inline fn black_pawn_attacks_right(board: u64) u64 {
     return (board & NOT_H_FILE) << 9;
 }
 
-pub fn white_pawn_attacks(board: u64) callconv (.Inline) u64 {
+pub inline fn white_pawn_attacks(board: u64) u64 {
     return white_pawn_attacks_left(board) | white_pawn_attacks_right(board);
 }
 
-pub fn black_pawn_attacks(board: u64) callconv (.Inline) u64 {
+pub inline fn black_pawn_attacks(board: u64) u64 {
     return black_pawn_attacks_left(board) | black_pawn_attacks_right(board);
 }
 
@@ -206,7 +209,8 @@ fn populate_occupancy_map(index_: u64, attack_map_: u64, num_bits: u6) u64 {
     var count: u6 = 0;
     while (count < num_bits): (count += 1) {
         // continously pop the ls1b
-        var square: u6 = bitops.ls1b_index(attack_map);
+        // truncate is safe here because there because we will never reach attack_map = 0
+        var square: u6 = @truncate(u6, @ctz(u64, attack_map));
         attack_map ^= @as(u64, 1) << square;
 
         if (index & 1 != 0) {
@@ -343,8 +347,8 @@ pub fn init_paths_between_squares() void {
                 PATH_BETWEEN_SQUARES[source][target] ^= @as(u64, 1) << source;
             }
             // if diagonally aligned (if the absolute difference between their ranks is the same as their files
-            else if (std.math.max(rank(source), rank(target)) - std.math.min(rank(source), rank(target)) ==
-                    std.math.max(file(source), file(target)) - std.math.min(file(source), file(target))) {
+            else if (@maximum(rank(source), rank(target)) - @minimum(rank(source), rank(target)) ==
+                    @maximum(file(source), file(target)) - @minimum(file(source), file(target))) {
                 PATH_BETWEEN_SQUARES[source][target] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
                 PATH_BETWEEN_SQUARES[source][target] ^= @as(u64, 1) << source;
             } else {
@@ -358,10 +362,10 @@ pub fn init_paths_between_squares() void {
     }
 }
 
-pub fn file(square: u6) callconv(.Inline) u3 {
+pub inline fn file(square: u6) u3 {
     return @intCast(u3, square & 0b111);
 }
 
-pub fn rank(square: u6) callconv(.Inline) u3 {
+pub inline fn rank(square: u6) u3 {
     return @intCast(u3, square >> 3);
 }

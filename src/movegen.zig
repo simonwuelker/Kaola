@@ -1,3 +1,4 @@
+//! Generates legal chess moves in a given position
 const std = @import("std");
 const bitops = @import("bitops.zig");
 const board = @import("board.zig");
@@ -70,7 +71,7 @@ pub fn generate_checkmask(game: board.Board) u64 {
     const them: u2  = if (!game.white_to_move) board.WHITE else board.BLACK;
     const opponent_straight_sliders: u64 = game.position[them][board.ROOK] | game.position[them][board.QUEEN];
     const opponent_diag_sliders: u64 = game.position[them][board.BISHOP] | game.position[them][board.QUEEN];
-    const king_square = bitops.ls1b_index(game.position[us][board.KING]);
+    const king_square = @truncate(u6, @ctz(u64, game.position[us][board.KING]));
 
     var checkmask: u64  = 0;
     var in_check: bool = false;
@@ -78,14 +79,14 @@ pub fn generate_checkmask(game: board.Board) u64 {
     // there can at most be one diag slider attacking the king (even with promotions, i think)
     const attacking_diag_slider = bitboard.bishop_attacks(king_square, game.occupancies[board.BOTH]) & opponent_diag_sliders;
     if (attacking_diag_slider != 0) {
-        const attacker_square = bitops.ls1b_index(attacking_diag_slider);
+        const attacker_square = @truncate(u6, @ctz(u64, attacking_diag_slider));
         checkmask |= bitboard.PATH_BETWEEN_SQUARES[attacker_square][king_square];
         in_check = true;
     }
 
     const attacking_straight_slider = bitboard.rook_attacks(king_square, game.occupancies[board.BOTH]) & opponent_straight_sliders;
     if (attacking_straight_slider != 0) {
-        const attacker_square = bitops.ls1b_index(attacking_straight_slider);
+        const attacker_square = @truncate(u6, @ctz(u64, attacking_straight_slider));
         checkmask |= bitboard.PATH_BETWEEN_SQUARES[attacker_square][king_square];
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
@@ -93,7 +94,7 @@ pub fn generate_checkmask(game: board.Board) u64 {
 
     const attacking_knight = bitboard.single_knight_attack(king_square) & game.position[them][board.KNIGHT];
     if (attacking_knight != 0) {
-        const knight_square = bitops.ls1b_index(attacking_knight);
+        const knight_square = @truncate(u6, @ctz(u64, attacking_knight));
         checkmask |= bitboard.PATH_BETWEEN_SQUARES[knight_square][king_square];
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
@@ -105,7 +106,7 @@ pub fn generate_checkmask(game: board.Board) u64 {
         else => unreachable,
     };
     if (attacking_pawns != 0) {
-        const pawn_square = bitops.ls1b_index(attacking_pawns);
+        const pawn_square = @truncate(u6, @ctz(u64, attacking_pawns));
         checkmask |= @as(u64, 1) << pawn_square;
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
