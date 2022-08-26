@@ -31,34 +31,47 @@ pub const Move = struct {
     from: u6,
     /// Target square
     to: u6,
-    /// If the move is a promotion: what the pawn promotes into, empty otherwise
-    promotion: ?Promotion,
 };
 
-fn handle_pawn_promotions(white: bool, source: u6, target: u6) void {
-    if (white) {
-        if (target < 8) {
-            // handle promotions
-            std.debug.print("{s} to {s} queen\n", .{board.square_name(source), board.square_name(target)});
-            std.debug.print("{s} to {s} rook\n", .{board.square_name(source), board.square_name(target)});
-            std.debug.print("{s} to {s} bishop\n", .{board.square_name(source), board.square_name(target)});
-            std.debug.print("{s} to {s} knight\n", .{board.square_name(source), board.square_name(target)});
-        } else {
-            std.debug.print("{s} to {s}\n", .{board.square_name(source), board.square_name(target)});
-        }
-    } else {
-        if (target > 55) {
-            // handle promotions
-            std.debug.print("{s} to {s} queen\n", .{board.square_name(source), board.square_name(target)});
-            std.debug.print("{s} to {s} rook\n", .{board.square_name(source), board.square_name(target)});
-            std.debug.print("{s} to {s} bishop\n", .{board.square_name(source), board.square_name(target)});
-            std.debug.print("{s} to {s} knight\n", .{board.square_name(source), board.square_name(target)});
-        } else {
-            std.debug.print("{s} to {s}\n", .{board.square_name(source), board.square_name(target)});
-        }
-    }
-}
+pub const MoveCallback = fn (move: Move) void;
 
+const Pinmask = struct {
+    straight: u64,
+    diagonal: u64,
+    both: u64,
+};
+
+pub fn generate_pinmask(game: board.Board, us: u2, them: u2) Pinmask {
+    const king_square = @truncate(u6, @ctz(u64, game.position[us][board.KING]));
+
+    // diagonal pins
+    const diag_attackers = game.position[them][board.BISHOP] | game.position[them][board.QUEEN];
+    const diag_blockers = bitboard.bishop_attacks(king_square, game.occupancies[board.BOTH]) & game.occupancies[us];
+    const diag_xray_attacks = bitboard.bishop_attacks(king_square, game.occupancies[board.BOTH] ^ diag_blockers);
+    var diag_pinners: u64 = diag_xray_attacks & diag_attackers;
+    var diag_pinmask: u64 = diag_pinners; // capturing the pinning piece is valid
+    while (diag_pinners != 0) : (bitops.pop_ls1b(&diag_pinners)) {
+        const pinner_square = @truncate(u6, @ctz(u64, diag_pinners));
+        diag_pinmask |= diag_xray_attacks & bitboard.bishop_attacks(pinner_square, game.position[us][board.KING]);
+    }
+
+    // straight pins
+    const straight_attackers = game.position[them][board.ROOK] | game.position[them][board.QUEEN];
+    const straight_blockers = bitboard.rook_attacks(king_square, game.occupancies[board.BOTH]) & game.occupancies[us];
+    const straight_xray_attacks = bitboard.rook_attacks(king_square, game.occupancies[board.BOTH] ^ straight_blockers);
+    var straight_pinners: u64 = straight_xray_attacks & straight_attackers;
+    var straight_pinmask: u64 = straight_pinners; // capturing the pinning piece is valid
+    while (straight_pinners != 0) : (bitops.pop_ls1b(&straight_pinners)) {
+        const pinner_square = @truncate(u6, @ctz(u64, straight_pinners));
+        straight_pinmask |= straight_xray_attacks & bitboard.rook_attacks(pinner_square, game.position[us][board.KING]);
+    }
+
+    return Pinmask{
+        .straight = straight_pinmask,
+        .diagonal = diag_pinmask,
+        .both = straight_pinmask | diag_pinmask,
+    };
+}
 
 /// The checkmask will be:
 /// * All bits set if our king is not currently in check
@@ -68,12 +81,12 @@ fn handle_pawn_promotions(white: bool, source: u6, target: u6) void {
 /// capture the attacking piece)
 pub fn generate_checkmask(game: board.Board) u64 {
     const us: u2 = if (game.white_to_move) board.WHITE else board.BLACK;
-    const them: u2  = if (!game.white_to_move) board.WHITE else board.BLACK;
+    const them: u2 = if (!game.white_to_move) board.WHITE else board.BLACK;
     const opponent_straight_sliders: u64 = game.position[them][board.ROOK] | game.position[them][board.QUEEN];
     const opponent_diag_sliders: u64 = game.position[them][board.BISHOP] | game.position[them][board.QUEEN];
     const king_square = @truncate(u6, @ctz(u64, game.position[us][board.KING]));
 
-    var checkmask: u64  = 0;
+    var checkmask: u64 = 0;
     var in_check: bool = false;
 
     // there can at most be one diag slider attacking the king (even with promotions, i think)
@@ -92,7 +105,7 @@ pub fn generate_checkmask(game: board.Board) u64 {
         in_check = true;
     }
 
-    const attacking_knight = bitboard.single_knight_attack(king_square) & game.position[them][board.KNIGHT];
+    const attacking_knight = bitboard.knight_attack(king_square) & game.position[them][board.KNIGHT];
     if (attacking_knight != 0) {
         const knight_square = @truncate(u6, @ctz(u64, attacking_knight));
         checkmask |= bitboard.PATH_BETWEEN_SQUARES[knight_square][king_square];
@@ -111,114 +124,41 @@ pub fn generate_checkmask(game: board.Board) u64 {
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
-    
+
     if (in_check) return checkmask;
     return ~@as(u64, 0);
-
 }
 
-// pub fn generate_moves(state: board.Board) void {
-//     // Find the possible king moves
-//     const color = if (state.white_to_move) board.WHITE else board.BLACK;
-//     const opponent  = if (!state.white_to_move) board.WHITE else board.BLACK;
-//     // const unsafe_squares = state.king_unsafe_squares();
-// 
-//     // king can move to any square that isn't attacked or occupied by our own piece
-//     // const possible_king_moves = bitboard.king_attacks(state.position[color][board.KING] & (~unsafe_squares | state.occupancy[color]));
-//     // const quiet_king_moves = possible_king_moves & ~state.occupancy[opponent];
-//     // const capture_king_moves = possible_king_moves & state.occupancy[opponent];
-// 
-//     const empty = ~state.occupancies[board.BOTH];
-//     if (state.white_to_move) {
-//         // quiet pawn moves (single)
-//         const pawns = state.position[board.WHITE][board.PAWN];
-//         const pawn_targets: u64 = pawns >> 8 & empty;
-//         var moves = pawn_targets;
-//         // iterate over the set bits (=> moves)
-//         while(moves != 0): (bitops.pop_ls1b(&moves)) {
-//             const target: u6 = @intCast(u6, bitops.ls1b_index(moves));
-//             const source: u6 = target + 8;
-//             handle_pawn_promotions(true, source, target);
-//         }
-// 
-//         // double pawn moves
-//         var double_pawn_moves = pawn_targets >> 8 & empty & RANK_4;
-//         moves = double_pawn_moves;
-//         // iterate over the set bits (=> moves)
-//         while(moves != 0): (bitops.pop_ls1b(&moves)) {
-//             const target: u6 = @intCast(u6, bitops.ls1b_index(moves));
-//             const source: u6 = target + 16;
-//             std.debug.print("{s} to {s}\n", .{board.square_name(source), board.square_name(target)});
-//         }
-// 
-//         // pawn captures
-//         var left_attacks = bitboard.white_pawn_attacks_left(pawns) & state.occupancies[board.BLACK];
-//         while (left_attacks != 0): (bitops.pop_ls1b(&left_attacks)) {
-//             const target = @intCast(u6, bitops.ls1b_index(left_attacks));
-//             const source = target + 9;
-//             handle_pawn_promotions(true, source, target);
-//         }
-// 
-//         var right_attacks = bitboard.white_pawn_attacks_right(pawns) & state.occupancies[board.BLACK];
-//         while (right_attacks != 0): (bitops.pop_ls1b(&right_attacks)) {
-//             const target = @intCast(u6, bitops.ls1b_index(right_attacks));
-//             const source = target + 7;
-//             handle_pawn_promotions(true, source, target);
-//         }
-// 
-//         // castle 
-//         if (state.castling_rights & board.WHITE_QUEENSIDE != 0 and state.occupancies[board.BOTH] & WHITE_QUEENSIDE_BLOCKERS == 0) {
-//             std.debug.print("castle long\n", .{});
-//         }
-//         if (state.castling_rights & board.WHITE_KINGSIDE != 0 and state.occupancies[board.BOTH] & WHITE_KINGSIDE_BLOCKERS == 0) {
-//             std.debug.print("castle short\n", .{});
-//         }
-//     } else {
-//         // quiet pawn moves (single)
-//         const pawns = state.position[board.BLACK][board.PAWN];
-//         const pawn_targets: u64 = pawns << 8 & empty;
-//         var moves = pawn_targets;
-//         // iterate over the set bits (=> moves)
-//         while(moves != 0): (bitops.pop_ls1b(&moves)) {
-//             const target: u6 = @intCast(u6, bitops.ls1b_index(moves));
-//             const source: u6 = target - 8;
-//             handle_pawn_promotions(false, source, target);
-//         }
-// 
-//         // double pawn moves
-//         var double_pawn_moves = pawn_targets << 8 & empty & RANK_5;
-//         moves = double_pawn_moves;
-//         // iterate over the set bits (=> moves)
-//         while(moves != 0): (bitops.pop_ls1b(&moves)) {
-//             const target: u6 = @intCast(u6, bitops.ls1b_index(moves));
-//             const source: u6 = target - 16;
-//             std.debug.print("{s} to {s}\n", .{board.square_name(source), board.square_name(target)});
-//         }
-// 
-//         // pawn captures
-//         var left_attacks = bitboard.black_pawn_attacks_left(pawns) & state.occupancies[board.WHITE];
-//         while (left_attacks != 0): (bitops.pop_ls1b(&left_attacks)) {
-//             const target = @intCast(u6, bitops.ls1b_index(left_attacks));
-//             const source = target - 7;
-//             handle_pawn_promotions(false, source, target);
-//         }
-// 
-//         var right_attacks = bitboard.black_pawn_attacks_right(pawns) & state.occupancies[board.WHITE];
-//         while (right_attacks != 0): (bitops.pop_ls1b(&right_attacks)) {
-//             const target = @intCast(u6, bitops.ls1b_index(right_attacks));
-//             const source = target - 9;
-//             handle_pawn_promotions(false, source, target);
-//         }
-// 
-//         // castle 
-//         if (state.castling_rights & board.BLACK_QUEENSIDE != 0 and state.occupancies[board.BOTH] & BLACK_QUEENSIDE_BLOCKERS == 0) {
-//             std.debug.print("castle long\n", .{});
-//         }
-//         if (state.castling_rights & board.BLACK_KINGSIDE != 0 and state.occupancies[board.BOTH] & BLACK_KINGSIDE_BLOCKERS == 0) {
-//             std.debug.print("castle short\n", .{});
-//         }
-//     }
-// }
+pub fn generate_moves(game: board.Board, callback: MoveCallback) void {
+    const us: u2 = if (game.white_to_move) board.WHITE else board.BLACK;
+    const them: u2 = if (!game.white_to_move) board.WHITE else board.BLACK;
+    const enemy_or_empty = ~game.occupancies[us];
+    const checkmask = generate_checkmask(game);
+    const pinmask = generate_pinmask(game, us, them);
+
+    // legal knight moves
+    // pinned knights can never move
+    var unpinned_knights = game.position[us][board.KNIGHT] & ~pinmask.both;
+    while (unpinned_knights != 0) : (bitops.pop_ls1b(&unpinned_knights)) {
+        const square = @truncate(u6, @ctz(u64, unpinned_knights));
+        var knight_moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
+        while (knight_moves != 0) : (bitops.pop_ls1b(&knight_moves)) {
+            const to = @truncate(u6, @ctz(u64, knight_moves));
+            callback(Move{
+                .from = square,
+                .to = to,
+            });
+        }
+    }
+
+    // legal bishop moves
+    // straight pinned bishops can never move
+    // const unpinned_bishops = game.position[us][board.BISHOP] & ~pinmask.both;
+    // const unp_bishop_moves = bitboard.bishop_attacks(unpinned_bishops, game.occupancies[board.BOTH]);
+    // const pinned_bishops = game.position[us][board.BISHOP] & pinmask.diagonal;
+    // const pin_bishop_moves = bitboard.bishop_attacks(pinned_bishops, game.occupancies[board.BOTH]) & pinmask.diagonal;
+    // bitboard.print_bitboard(unp_bishop_moves | pin_bishop_moves, "knight moves");
+}
 
 test "checkmask generation" {
     const expectEqual = std.testing.expectEqual;

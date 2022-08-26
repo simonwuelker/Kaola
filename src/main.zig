@@ -1,6 +1,6 @@
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
-const Board = @import("board.zig").Board;
+const board = @import("board.zig");
 const movegen = @import("movegen.zig");
 
 pub fn init() void {
@@ -9,16 +9,19 @@ pub fn init() void {
     bitboard.init_paths_between_squares(); // depends on initialized slider attacks
 }
 
+fn callback(move: movegen.Move) void {
+    std.debug.print("{s} to {s}\n", .{ board.square_name(move.from), board.square_name(move.to) });
+}
+
 pub fn main() !void {
     init();
     // bitboard.print_bitboard(bitboard.PATH_BETWEEN_SQUARES[@enumToInt(Field.B3)][@enumToInt(Field.G8)]);
-    var board = try Board.from_fen("8/8/5q2/8/8/2K5/8/8 w - - 99 50");
-    board.print();
-    bitboard.print_bitboard(movegen.generate_checkmask(board));
+    var game = try board.Board.from_fen("8/r1b3Q1/8/4N3/3K4/2n5/1B3R2/8 w - - 99 50");
+    game.print();
     // const bb = board.attacked_squares(true);
     // board.print();
     // bitboard.print_bitboard(bb);
-    // movegen.generate_moves(board);
+    movegen.generate_moves(game, callback);
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
