@@ -3,6 +3,23 @@
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
 const bitops = @import("bitops.zig");
+const movegen = @import("movegen.zig");
+const Move = movegen.Move;
+const MoveType = movegen.MoveType;
+
+// Chess pieces
+const WHITE_KING = Piece.new(Color.white, PieceType.king);
+const WHITE_QUEEN = Piece.new(Color.white, PieceType.queen);
+const WHITE_ROOK = Piece.new(Color.white, PieceType.rook);
+const WHITE_BISHOP = Piece.new(Color.white, PieceType.bishop);
+const WHITE_KNIGHT = Piece.new(Color.white, PieceType.knight);
+const WHITE_PAWN = Piece.new(Color.white, PieceType.pawn);
+const BLACK_KING = Piece.new(Color.black, PieceType.king);
+const BLACK_QUEEN = Piece.new(Color.black, PieceType.queen);
+const BLACK_ROOK = Piece.new(Color.black, PieceType.rook);
+const BLACK_BISHOP = Piece.new(Color.black, PieceType.bishop);
+const BLACK_KNIGHT = Piece.new(Color.black, PieceType.knight);
+const BLACK_PAWN = Piece.new(Color.black, PieceType.pawn);
 
 pub const PieceType = enum(u3) {
     pawn,
@@ -13,27 +30,15 @@ pub const PieceType = enum(u3) {
     king,
 };
 
-pub const Piece = enum(u4) {
-    white_pawn,
-    white_knight,
-    white_bishop,
-    white_rook,
-    white_queen,
-    white_king,
-    black_pawn,
-    black_knight,
-    black_bishop,
-    black_rook,
-    black_queen,
-    black_king,
-    no_piece,
+pub const Piece = struct {
+    color: Color,
+    piece_type: PieceType,
 
     pub inline fn new(color: Color, piece_type: PieceType) Piece {
-        return @intToEnum(Piece, @enumToInt(color) * @as(u4, 6) + @enumToInt(piece_type));
-    }
-
-    pub inline fn is_white(self: *const Piece) bool {
-        return @enumToInt(self.*) < @enumToInt(Piece.black_pawn);
+        return Piece{
+            .color = color,
+            .piece_type = piece_type,
+        };
     }
 };
 
@@ -87,8 +92,8 @@ pub fn square_name(square: u6) [2]u8 {
 }
 
 pub const Board = struct {
-    bb_position: [12]u64,
-    pieces: [64]Piece,
+    bb_position: [2][6]u64,
+    pieces: [64]?Piece,
     occupancies: [3]u64,
     active_color: Color,
     castling_rights: CastlingRights,
@@ -98,8 +103,8 @@ pub const Board = struct {
 
     fn new() Board {
         return Board{
-            .bb_position = [1]u64{0} ** 12,
-            .pieces = [1]Piece{Piece.no_piece} ** 64,
+            .bb_position = [1][6]u64{[1]u64{0} ** 6} ** 2,
+            .pieces = [1]?Piece{null} ** 64,
             .occupancies = [1]u64{0} ** 3,
             .active_color = Color.white,
             .castling_rights = CastlingRights.none(),
@@ -109,24 +114,25 @@ pub const Board = struct {
         };
     }
 
-    pub fn put_piece(self: *Board, piece: Piece, square: u6) void {
+    pub fn place_piece(self: *Board, piece: Piece, square: u6) void {
         const mask = @as(u64, 1) << square;
-        self.bb_position[@enumToInt(piece)] |= mask;
-        self.occupancies[@boolToInt(!piece.is_white())] |= mask;
+        self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)] |= mask;
+        self.occupancies[@enumToInt(piece.color)] |= mask;
         self.occupancies[@enumToInt(Color.both)] |= mask;
         self.pieces[square] = piece;
     }
 
     /// Clearing an already empty square is undefined behaviour
-    pub fn clear(self: *Board, square: u6) void {
+    pub fn take_piece(self: *Board, square: u6) Piece {
         const piece = self.pieces[square];
         std.debug.assert(piece != Piece.no_piece);
         const mask = @as(u64, 1) << square;
 
         self.pieces[square] = Piece.no_piece;
-        self.bb_position[@enumToInt(piece)] ^= mask;
+        self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)] ^= mask;
         self.occupancies[@enumToInt(Color.both)] ^= mask;
-        self.occupancies[@boolToInt(!piece.is_white)] ^= mask;
+        self.occupancies[@enumToInt(piece.color)] ^= mask;
+        return piece;
     }
 
     /// Create a new board with the starting position
@@ -135,7 +141,7 @@ pub const Board = struct {
     }
 
     pub inline fn get_bitboard(self: *const Board, piece: Piece) u64 {
-        return self.bb_position[@enumToInt(piece)];
+        return self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)];
     }
 
     pub inline fn get_occupancies(self: *const Board, color: Color) u64 {
@@ -155,18 +161,18 @@ pub const Board = struct {
             var file: u6 = 0;
             for (entry) |c| {
                 switch (c) {
-                    'K' => board.put_piece(Piece.white_king, rank * 8 + file),
-                    'Q' => board.put_piece(Piece.white_queen, rank * 8 + file),
-                    'R' => board.put_piece(Piece.white_rook, rank * 8 + file),
-                    'B' => board.put_piece(Piece.white_bishop, rank * 8 + file),
-                    'N' => board.put_piece(Piece.white_knight, rank * 8 + file),
-                    'P' => board.put_piece(Piece.white_pawn, rank * 8 + file),
-                    'k' => board.put_piece(Piece.black_king, rank * 8 + file),
-                    'q' => board.put_piece(Piece.black_queen, rank * 8 + file),
-                    'r' => board.put_piece(Piece.black_rook, rank * 8 + file),
-                    'b' => board.put_piece(Piece.black_bishop, rank * 8 + file),
-                    'n' => board.put_piece(Piece.black_knight, rank * 8 + file),
-                    'p' => board.put_piece(Piece.black_pawn, rank * 8 + file),
+                    'K' => board.place_piece(WHITE_KING, rank * 8 + file),
+                    'Q' => board.place_piece(WHITE_QUEEN, rank * 8 + file),
+                    'R' => board.place_piece(WHITE_ROOK, rank * 8 + file),
+                    'B' => board.place_piece(WHITE_BISHOP, rank * 8 + file),
+                    'N' => board.place_piece(WHITE_KNIGHT, rank * 8 + file),
+                    'P' => board.place_piece(WHITE_PAWN, rank * 8 + file),
+                    'k' => board.place_piece(BLACK_KING, rank * 8 + file),
+                    'q' => board.place_piece(BLACK_QUEEN, rank * 8 + file),
+                    'r' => board.place_piece(BLACK_ROOK, rank * 8 + file),
+                    'b' => board.place_piece(BLACK_BISHOP, rank * 8 + file),
+                    'n' => board.place_piece(BLACK_KNIGHT, rank * 8 + file),
+                    'p' => board.place_piece(BLACK_PAWN, rank * 8 + file),
                     '1'...'8' => file += @intCast(u3, c - '1'),
                     else => return FenParseError.InvalidPosition,
                 }
@@ -227,26 +233,81 @@ pub const Board = struct {
             var j: u6 = 0;
             while (j < 8) : (j += 1) {
                 const square = i * 8 + j;
-                const c = switch (self.pieces[square]) {
-                    Piece.white_pawn => "P", // white pawn
-                    Piece.white_knight => "N", // white knight
-                    Piece.white_bishop => "B",
-                    Piece.white_rook => "R",
-                    Piece.white_queen => "Q",
-                    Piece.white_king => "K",
-                    Piece.black_pawn => "p",
-                    Piece.black_knight => "n",
-                    Piece.black_bishop => "b",
-                    Piece.black_rook => "r",
-                    Piece.black_queen => "q",
-                    Piece.black_king => "k",
-                    Piece.no_piece => ".",
-                };
-                std.debug.print("{s} ", .{c});
+
+                var c: u8 = '.';
+                if (self.pieces[square]) |piece| {
+                    c = switch (piece.piece_type) {
+                        PieceType.pawn => 'P',
+                        PieceType.knight => 'N',
+                        PieceType.bishop => 'B',
+                        PieceType.rook => 'R',
+                        PieceType.queen => 'Q',
+                        PieceType.king => 'K',
+                    };
+                    // lowercase for black pieces
+                    if (piece.color == Color.black) c += 0x20;
+                }
+                std.debug.print("{c} ", .{c});
             }
             std.debug.print("\n", .{});
         }
         std.debug.print("\n   a b c d e f g h\n", .{});
+    }
+
+    pub fn apply(self: *Board, move: Move) void {
+        switch (move.move_type) {
+            MoveType.QUIET => {
+                self.place_piece(self.take_piece(move.from), move.to);
+            },
+            MoveType.CAPTURE => {
+                self.take_piece(move.to);
+                self.place_piece(self.take_piece(move.from), move.to);
+            },
+            MoveType.PROMOTE_KNIGHT => {
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.knight;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.PROMOTE_BISHOP => {
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.bishop;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.PROMOTE_ROOK => {
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.rook;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.PROMOTE_QUEEN => {
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.queen;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.CAPTURE_PROMOTE_KNIGHT => {
+                self.take_piece(move.to);
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.knight;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.CAPTURE_PROMOTE_BISHOP => {
+                self.take_piece(move.to);
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.bishop;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.CAPTURE_PROMOTE_ROOK => {
+                self.take_piece(move.to);
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.rook;
+                self.place_piece(promoting_piece, move.to);
+            },
+            MoveType.CAPTURE_PROMOTE_QUEEN => {
+                self.take_piece(move.to);
+                var promoting_piece = self.take_piece(move.from);
+                promoting_piece.piece_type = PieceType.queen;
+                self.place_piece(promoting_piece, move.to);
+            },
+        }
     }
 
     // /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color

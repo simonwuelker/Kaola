@@ -23,35 +23,36 @@ const BLACK_KINGSIDE_BLOCKERS = 0x60;
 
 /// Bitflag representation of move properties, mostly same as
 /// https://github.com/nkarve/surge/blob/c4ea4e2655cc938632011672ddc880fefe7d02a6/src/types.h#L146-L157
-pub const MoveFlags = struct {
+pub const MoveType = enum(u4) {
     /// The move does not capture anything and isn't special either
-    const QUIET = 0b0000;
+    QUIET,
     /// A pawn was moved two squares
-    const DOUBLE_PUSH = 0b0001;
+    /// This is relevant because of en passant
+    DOUBLE_PUSH,
     /// Castle Kingside
-    const CASTLE_SHORT = 0b0010;
+    CASTLE_SHORT,
     /// Castle Queenside
-    const CASTLE_LONG = 0b0011;
+    CASTLE_LONG,
     /// The move captures a piece
-    const CAPTURE = 0b1000;
+    CAPTURE,
     /// Capture a pawn en-passant
-    const EN_PASSANT = 0b1010;
+    EN_PASSANT,
     /// Promote to a knight
-    const PROMOTE_KNIGHT = 0b0100;
+    PROMOTE_KNIGHT,
     /// Promote to a rook
-    const PROMOTE_ROOK = 0b0101;
+    PROMOTE_ROOK,
     /// Promote to a bishop
-    const PROMOTE_BISHOP = 0b0110;
+    PROMOTE_BISHOP,
     /// Promote to a queen
-    const PROMOTE_QUEEN = 0b0111;
+    PROMOTE_QUEEN,
     /// Capture a piece and promote to a knight
-    const CAPTURE_PROMOTE_KNIGHT = 0b1100;
+    CAPTURE_PROMOTE_KNIGHT,
     /// Capture a piece and promote to a rook
-    const CAPTURE_PROMOTE_ROOK = 0b1101;
+    CAPTURE_PROMOTE_ROOK,
     /// Capture a piece and promote to a bishop
-    const CAPTURE_PROMOTE_BISHOP = 0b1110;
+    CAPTURE_PROMOTE_BISHOP,
     /// Capture a piece and promote to a queen
-    const CAPTURE_PROMOTE_QUEEN = 0b1111;
+    CAPTURE_PROMOTE_QUEEN,
 };
 
 pub const Move = struct {
@@ -60,18 +61,18 @@ pub const Move = struct {
     /// Target square
     to: u6,
     /// Move properties
-    flags: u4,
+    move_type: MoveType,
 
     pub fn quiet(from: u6, to: u6) Move {
         return Move{
             .from = from,
             .to = to,
-            .flags = MoveFlags.QUIET,
+            .move_type = MoveType.QUIET,
         };
     }
 
     pub inline fn is_capture(self: *Move) bool {
-        return (self.flags & MoveFlags.CAPTURE) != 0;
+        return (self.flags & MoveType.CAPTURE) != 0;
     }
 };
 
@@ -201,7 +202,7 @@ pub fn generate_moves(game: board.Board, callback: MoveCallback) void {
             callback(Move{
                 .from = square,
                 .to = to,
-                .flags = MoveFlags.QUIET,
+                .move_type = MoveType.QUIET,
             });
         }
     }
@@ -217,7 +218,7 @@ pub fn generate_moves(game: board.Board, callback: MoveCallback) void {
             callback(Move{
                 .from = square,
                 .to = to,
-                .flags = MoveFlags.QUIET,
+                .move_type = MoveType.QUIET,
             });
         }
     }
@@ -231,7 +232,7 @@ pub fn generate_moves(game: board.Board, callback: MoveCallback) void {
             callback(Move{
                 .from = square,
                 .to = to,
-                .flags = MoveFlags.QUIET,
+                .move_type = MoveType.QUIET,
             });
         }
     }
@@ -247,7 +248,7 @@ pub fn generate_moves(game: board.Board, callback: MoveCallback) void {
             callback(Move{
                 .from = square,
                 .to = to,
-                .flags = MoveFlags.QUIET,
+                .move_type = MoveType.QUIET,
             });
         }
     }
@@ -261,7 +262,7 @@ pub fn generate_moves(game: board.Board, callback: MoveCallback) void {
             callback(Move{
                 .from = square,
                 .to = to,
-                .flags = MoveFlags.QUIET,
+                .move_type = MoveType.QUIET,
             });
         }
     }
@@ -300,7 +301,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
         emit(Move{
             .from = to + 8,
             .to = to,
-            .flags = MoveFlags.QUIET,
+            .move_type = MoveType.QUIET,
         });
     }
 
@@ -312,7 +313,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
         emit(Move{
             .from = to + 16,
             .to = to,
-            .flags = MoveFlags.DOUBLE_PUSH,
+            .move_type = MoveType.QUIET,
         });
     }
 
@@ -337,7 +338,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
         emit(Move{
             .from = to + 9,
             .to = to,
-            .flags = MoveFlags.CAPTURE,
+            .move_type = MoveType.CAPTURE,
         });
     }
 
@@ -346,7 +347,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
         emit(Move{
             .from = to + 7,
             .to = to,
-            .flags = MoveFlags.CAPTURE,
+            .move_type = MoveType.CAPTURE,
         });
     }
 }
