@@ -2,11 +2,13 @@ const std = @import("std");
 const bitboard = @import("bitboard.zig");
 const board = @import("board.zig");
 const movegen = @import("movegen.zig");
+const pesto = @import("pesto.zig");
 
 pub fn init() void {
     // init_magic_numbers();
     bitboard.init_slider_attacks();
     bitboard.init_paths_between_squares(); // depends on initialized slider attacks
+    pesto.init_tables();
 }
 
 fn callback(move: movegen.Move) void {
@@ -16,12 +18,15 @@ fn callback(move: movegen.Move) void {
 pub fn main() !void {
     init();
 
-    var game = try board.Board.from_fen("8/7q/8/8/4Q3/8/P1K5/8 w - - 99 50");
+    // var game = try board.Board.from_fen("8/7q/8/8/4Q3/8/P1K5/8 w - - 99 50");
+    var game = board.Board.starting_position();
     game.print();
+    std.debug.print("eval says {d}\n", .{pesto.evaluate(game)});
+    // game.print();
     // const bb = board.attacked_squares(true);
     // board.print();
     // bitboard.print_bitboard(bb);
-    movegen.generate_moves(game, callback);
+    // movegen.generate_moves(game, callback);
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
