@@ -15,8 +15,8 @@ fn callback(move: movegen.Move) void {
 
 pub fn main() !void {
     init();
-    // bitboard.print_bitboard(bitboard.PATH_BETWEEN_SQUARES[@enumToInt(Field.B3)][@enumToInt(Field.G8)]);
-    var game = try board.Board.from_fen("8/r1b3Q1/8/4N3/3K4/2n5/1B3R2/8 w - - 99 50");
+
+    var game = try board.Board.from_fen("8/7q/8/8/4Q3/8/P1K5/8 w - - 99 50");
     game.print();
     // const bb = board.attacked_squares(true);
     // board.print();

@@ -77,6 +77,13 @@ fn bitboard_distance_to_edge(field: u6, shift: i5) u3 {
     };
 }
 
+/// Get the index of the least significant bit in a bitboard.
+/// Causes undefined behaviour if the bitboard has no bit set.
+pub inline fn get_lsb_square(board: u64) u6 {
+    std.debug.assert(board != 0);
+    return @truncate(u6, @ctz(u64, board));
+}
+
 fn attacks_in_direction(start: u6, signed_shift: i5, blocked: u64) u64 {
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
     const negative_shift = if (signed_shift < 0) true else false;
