@@ -1,8 +1,10 @@
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
-const board = @import("board.zig");
+const Board = @import("board.zig").Board;
 const movegen = @import("movegen.zig");
 const pesto = @import("pesto.zig");
+const searcher = @import("searcher.zig");
+const uci = @import("uci.zig");
 
 pub fn init() void {
     // init_magic_numbers();
@@ -11,22 +13,25 @@ pub fn init() void {
     pesto.init_tables();
 }
 
-fn callback(move: movegen.Move) void {
-    std.debug.print("{s} to {s}\n", .{ board.square_name(move.from), board.square_name(move.to) });
-}
-
 pub fn main() !void {
     init();
 
+    var game: Board = undefined;
+    mainloop: while (true) {
+        const command = try uci.next_command();
+        switch (command) {
+            uci.Command.quit => break :mainloop,
+            uci.Command.newgame => game = Board.starting_position(),
+            uci.Command.board => game.print(),
+            uci.Command.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
+        }
+    }
     // var game = try board.Board.from_fen("8/7q/8/8/4Q3/8/P1K5/8 w - - 99 50");
-    var game = board.Board.starting_position();
-    game.print();
-    std.debug.print("eval says {d}\n", .{pesto.evaluate(game)});
+    // var game = board.Board.starting_position();
     // game.print();
-    // const bb = board.attacked_squares(true);
-    // board.print();
-    // bitboard.print_bitboard(bb);
-    // movegen.generate_moves(game, callback);
+    // std.debug.print("eval says {d}\n", .{pesto.evaluate(game)});
+    // game.apply(searcher.search(game));
+    // game.print();
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
