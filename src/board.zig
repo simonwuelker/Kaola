@@ -21,6 +21,73 @@ const BLACK_BISHOP = Piece.new(Color.black, PieceType.bishop);
 const BLACK_KNIGHT = Piece.new(Color.black, PieceType.knight);
 const BLACK_PAWN = Piece.new(Color.black, PieceType.pawn);
 
+const Square = enum(u6) {
+    A8,
+    B8,
+    C8,
+    D8,
+    E8,
+    F8,
+    G8,
+    H8,
+    A7,
+    B7,
+    C7,
+    D7,
+    E7,
+    F7,
+    G7,
+    H7,
+    A6,
+    B6,
+    C6,
+    D6,
+    E6,
+    F6,
+    G6,
+    H6,
+    A5,
+    B5,
+    C5,
+    D5,
+    E5,
+    F5,
+    G5,
+    H5,
+    A4,
+    B4,
+    C4,
+    D4,
+    E4,
+    F4,
+    G4,
+    H4,
+    A3,
+    B3,
+    C3,
+    D3,
+    E3,
+    F3,
+    G3,
+    H3,
+    A2,
+    B2,
+    C2,
+    D2,
+    E2,
+    F2,
+    G2,
+    H2,
+    A1,
+    B1,
+    C1,
+    D1,
+    E1,
+    F1,
+    G1,
+    H1,
+};
+
 pub const PieceType = enum(u3) {
     pawn,
     knight,
@@ -124,11 +191,10 @@ pub const Board = struct {
 
     /// Clearing an already empty square is undefined behaviour
     pub fn take_piece(self: *Board, square: u6) Piece {
-        const piece = self.pieces[square];
-        std.debug.assert(piece != Piece.no_piece);
+        const piece = self.pieces[square] orelse unreachable;
         const mask = @as(u64, 1) << square;
 
-        self.pieces[square] = Piece.no_piece;
+        self.pieces[square] = null;
         self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)] ^= mask;
         self.occupancies[@enumToInt(Color.both)] ^= mask;
         self.occupancies[@enumToInt(piece.color)] ^= mask;
@@ -255,13 +321,60 @@ pub const Board = struct {
     }
 
     pub fn apply(self: *Board, move: Move) void {
+        // contains a few if cases but only on rare move types (castling/en passant)
+        // so it should be fine
         switch (move.move_type) {
             MoveType.QUIET => {
                 self.place_piece(self.take_piece(move.from), move.to);
             },
             MoveType.CAPTURE => {
-                self.take_piece(move.to);
+                _ = self.take_piece(move.to);
                 self.place_piece(self.take_piece(move.from), move.to);
+            },
+            MoveType.DOUBLE_PUSH => {
+                self.place_piece(self.take_piece(move.from), move.to);
+                self.en_passant = move.to;
+                self.active_color = self.active_color.other();
+                return; // so we don't hit the en passant reset after the switch
+            },
+            MoveType.CASTLE_SHORT => {
+                switch (self.active_color) {
+                    Color.white => {
+                        self.place_piece(self.take_piece(@enumToInt(Square.E1)), @enumToInt(Square.G1));
+                        self.place_piece(self.take_piece(@enumToInt(Square.H1)), @enumToInt(Square.F1));
+                    },
+                    Color.black => {
+                        self.place_piece(self.take_piece(@enumToInt(Square.E8)), @enumToInt(Square.G8));
+                        self.place_piece(self.take_piece(@enumToInt(Square.H8)), @enumToInt(Square.F8));
+                    },
+                    else => unreachable,
+                }
+            },
+            MoveType.CASTLE_LONG => {
+                switch (self.active_color) {
+                    Color.white => {
+                        self.place_piece(self.take_piece(@enumToInt(Square.E1)), @enumToInt(Square.C1));
+                        self.place_piece(self.take_piece(@enumToInt(Square.A1)), @enumToInt(Square.D1));
+                    },
+                    Color.black => {
+                        self.place_piece(self.take_piece(@enumToInt(Square.E8)), @enumToInt(Square.C8));
+                        self.place_piece(self.take_piece(@enumToInt(Square.A8)), @enumToInt(Square.D8));
+                    },
+                    else => unreachable,
+                }
+            },
+            MoveType.EN_PASSANT => {
+                switch (self.active_color) {
+                    Color.white => {
+                        self.place_piece(self.take_piece(move.from), move.to);
+                        _ = self.take_piece(move.to + 8);
+                    },
+                    Color.black => {
+                        self.place_piece(self.take_piece(@enumToInt(Square.E8)), @enumToInt(Square.C8));
+                        _ = self.take_piece(move.to - 8);
+                    },
+                    else => unreachable,
+                }
             },
             MoveType.PROMOTE_KNIGHT => {
                 var promoting_piece = self.take_piece(move.from);
@@ -284,84 +397,79 @@ pub const Board = struct {
                 self.place_piece(promoting_piece, move.to);
             },
             MoveType.CAPTURE_PROMOTE_KNIGHT => {
-                self.take_piece(move.to);
+                _ = self.take_piece(move.to);
                 var promoting_piece = self.take_piece(move.from);
                 promoting_piece.piece_type = PieceType.knight;
                 self.place_piece(promoting_piece, move.to);
             },
             MoveType.CAPTURE_PROMOTE_BISHOP => {
-                self.take_piece(move.to);
+                _ = self.take_piece(move.to);
                 var promoting_piece = self.take_piece(move.from);
                 promoting_piece.piece_type = PieceType.bishop;
                 self.place_piece(promoting_piece, move.to);
             },
             MoveType.CAPTURE_PROMOTE_ROOK => {
-                self.take_piece(move.to);
+                _ = self.take_piece(move.to);
                 var promoting_piece = self.take_piece(move.from);
                 promoting_piece.piece_type = PieceType.rook;
                 self.place_piece(promoting_piece, move.to);
             },
             MoveType.CAPTURE_PROMOTE_QUEEN => {
-                self.take_piece(move.to);
+                _ = self.take_piece(move.to);
                 var promoting_piece = self.take_piece(move.from);
                 promoting_piece.piece_type = PieceType.queen;
                 self.place_piece(promoting_piece, move.to);
             },
         }
+        self.active_color = self.active_color.other();
+        self.en_passant = null;
     }
 
-    // /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
-    // /// Note that the opponent king is effectively considered to be nonexistent, as he cannot move
-    // /// to squares that are x-rayed by an opponent slider piece.
-    // /// So result is "a bitboard marking all positions that the opponent king cannot move to".
-    // pub fn king_unsafe_squares(self: *Board, opponent_color: Color) u64 {
-    //     var attacked: u64 = 0;
-    //     const my_color = opponent_color.other();
-    //     const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(Piece.new(my_color, PieceType.king));
+    /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
+    /// Note that the king is effectively considered to be nonexistent, as he cannot move
+    /// to squares that are x-rayed by an opponent slider piece.
+    /// So result is "a bitboard marking all positions that the opponent king cannot move to".
+    pub fn king_unsafe_squares(self: *const Board) u64 {
+        var attacked: u64 = 0;
+        const us = self.active_color;
+        const them = us.other();
+        const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(Piece.new(us, PieceType.king));
 
-    //     // pawns
-    //     if (by_white) {
-    //         attacked |= bitboard.white_pawn_attacks_left(self.position[opponent_color][PAWN]);
-    //         attacked |= bitboard.white_pawn_attacks_right(self.position[opponent_color][PAWN]);
-    //     } else {
-    //         attacked |= bitboard.black_pawn_attacks_left(self.position[opponent_color][PAWN]);
-    //         attacked |= bitboard.black_pawn_attacks_right(self.position[opponent_color][PAWN]);
-    //     }
+        // pawns
+        const opponent_pawns = self.get_bitboard(Piece.new(them, PieceType.pawn));
+        if (them == Color.white) {
+            attacked |= bitboard.white_pawn_attacks(opponent_pawns);
+        } else {
+            attacked |= bitboard.black_pawn_attacks(opponent_pawns);
+        }
 
-    //     // knights
-    //     var knights = self.position[opponent_color][KNIGHT];
-    //     while (knights != 0) : (bitops.pop_ls1b(&knights)) {
-    //         const index = bitops.ls1b_index(knights);
-    //         attacked |= bitboard.knight_attacks(index);
-    //     }
+        // knights
+        var knights = self.get_bitboard(Piece.new(them, PieceType.knight));
+        while (knights != 0) : (bitops.pop_ls1b(&knights)) {
+            const square = bitboard.get_lsb_square(knights);
+            attacked |= bitboard.knight_attacks(square);
+        }
 
-    //     // bishops
-    //     var bishops = self.position[opponent_color][BISHOP];
-    //     while (bishops != 0) : (bitops.pop_ls1b(&bishops)) {
-    //         const index = bitops.ls1b_index(bishops);
-    //         attacked |= bitboard.bishop_attacks(index, ALL_WITHOUT_KING);
-    //     }
+        // bishops
+        var diag_sliders = self.get_bitboard(Piece.new(them, PieceType.bishop)) | self.get_bitboard(Piece.new(them, PieceType.queen));
+        while (diag_sliders != 0) : (bitops.pop_ls1b(&diag_sliders)) {
+            const square = bitboard.get_lsb_square(diag_sliders);
+            attacked |= bitboard.bishop_attacks(square, ALL_WITHOUT_KING);
+        }
 
-    //     // rooks
-    //     var rooks = self.position[opponent_color][ROOK];
-    //     while (rooks != 0) : (bitops.pop_ls1b(&rooks)) {
-    //         const index = bitops.ls1b_index(rooks);
-    //         attacked |= bitboard.rook_attacks(index, ALL_WITHOUT_KING);
-    //     }
+        // rooks
+        var straight_sliders = self.get_bitboard(Piece.new(them, PieceType.rook)) | self.get_bitboard(Piece.new(them, PieceType.queen));
+        while (straight_sliders != 0) : (bitops.pop_ls1b(&straight_sliders)) {
+            const square = bitboard.get_lsb_square(straight_sliders);
+            attacked |= bitboard.rook_attacks(square, ALL_WITHOUT_KING);
+        }
 
-    //     // queens
-    //     var queens = self.position[opponent_color][QUEEN];
-    //     while (queens != 0) : (bitops.pop_ls1b(&queens)) {
-    //         const index = bitops.ls1b_index(queens);
-    //         attacked |= bitboard.queen_attacks(index, ALL_WITHOUT_KING);
-    //     }
-
-    //     // king(s)
-    //     var kings = self.position[opponent_color][KING];
-    //     while (kings != 0) : (bitops.pop_ls1b(&kings)) {
-    //         const index = bitops.ls1b_index(kings);
-    //         attacked |= bitboard.king_attacks(index);
-    //     }
-    //     return attacked;
-    // }
+        // king(s)
+        var kings = self.get_bitboard(Piece.new(them, PieceType.king));
+        while (kings != 0) : (bitops.pop_ls1b(&kings)) {
+            const square = bitboard.get_lsb_square(kings);
+            attacked |= bitboard.king_attacks(square);
+        }
+        return attacked;
+    }
 };

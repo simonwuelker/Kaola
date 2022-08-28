@@ -9,3 +9,5 @@
 | [`movegen.zig`](https://github.com/Wuelle/zigchess/blob/main/src/movegen.zig) | Generate legal chess moves from a board state |
 | [`rand.zig`](https://github.com/Wuelle/zigchess/blob/main/src/rand.zig) | Fast and simple random number generation |
 | [`pesto.zig`](https://github.com/Wuelle/zigchess/blob/main/src/pesto.zig) | Position evaluation function [PeSTO](https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function) |
+| [`searcher.zig`](https://github.com/Wuelle/zigchess/blob/main/src/searcher.zig) | Searches a position for the best move |
+| [`uci.zig`](https://github.com/Wuelle/zigchess/blob/main/src/uci.zig) | Implements the [Universal Chess Interface](https://en.wikipedia.org/wiki/Universal_Chess_Interface) |
