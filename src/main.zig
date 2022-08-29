@@ -22,6 +22,8 @@ pub fn main() !void {
         switch (command) {
             uci.Command.quit => break :mainloop,
             uci.Command.newgame => game = Board.starting_position(),
+            uci.Command.go => {},
+            uci.Command.stop => {},
             uci.Command.board => game.print(),
             uci.Command.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
         }

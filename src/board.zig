@@ -86,6 +86,10 @@ const Square = enum(u6) {
     F1,
     G1,
     H1,
+
+    pub fn from_str(str: []const u8) Square {
+        return @intToEnum(Square, ('8' - str[1]) * 8 + (str[0] - 'a'));
+    }
 };
 
 pub const PieceType = enum(u3) {

@@ -4,6 +4,7 @@ const bitops = @import("bitops.zig");
 const board = @import("board.zig");
 const Piece = board.Piece;
 const Color = board.Color;
+const Square = board.Square;
 const PieceType = board.PieceType;
 const bitboard = @import("bitboard.zig");
 
@@ -71,8 +72,102 @@ pub const Move = struct {
         };
     }
 
-    pub inline fn is_capture(self: *Move) bool {
-        return (self.flags & MoveType.CAPTURE) != 0;
+    const MoveParseError = error{
+        NoPieceFound,
+        InvalidLength,
+        InvalidPromotion,
+        InvalidSquare,
+    };
+
+    /// Move is assumed to be more or less correct, only limited safety checks are performed
+    pub fn from_str(str: []const u8, game: board.Board) MoveParseError!Move {
+        if (str.len != 4 and str.len != 5) return MoveParseError.InvalidLength;
+
+        const from = Square.from_str(str[0..2]);
+        const to = Square.from_str(str[2..4]);
+        const moving_piece = game.pieces(@enumToInt(from)) orelse return MoveParseError.NoPieceFound;
+
+        // Correctly parsing moves is a long and painful process, so to keep it somewhat organized
+        // we *first* determine the properties of a move and *then* set to move type.
+        var is_capture = false;
+        var is_promotion = false;
+        var is_en_passant = false;
+        var is_castle_short = false;
+        var is_castle_long = false;
+        var is_double_push = false;
+
+        var promote_to: ?PieceType = null;
+        if (str.len == 5) {
+            promote_to = switch (str[4]) {
+                'q' => PieceType.queen,
+                'r' => PieceType.rook,
+                'b' => PieceType.bishop,
+                'n' => PieceType.knight,
+                else => return MoveParseError.InvalidPromotion,
+            };
+        }
+        if (game.active_color == Color.white and game.castling_rights.white_queenside and from == Square.e1 and to == Square.c1 or
+            game.active_color == Color.black and game.castling_rights.black_queenside and from == Square.e8 and to == Square.c8)
+        {
+            is_castle_long = true;
+        } else if (game.active_color == Color.white and game.castling_rights.white_kingside and from == Square.e1 and to == Square.g1 or
+            game.active_color == Color.black and game.castling_rights.black_kingside and from == Square.e8 and to == Square.g8)
+        {
+            is_castle_short = true;
+        }
+        // any pawn moves that covers two ranks must be a double push
+        const from_rank = bitboard.rank(@enumToInt(from));
+        const to_rank = bitboard.rank(@enumToInt(to));
+        if (moving_piece.piece_type == PieceType.pawn and @maximum(from_rank, to_rank) - @minimum(from_rank, to_rank) == 2) {
+            is_en_passant = true;
+        }
+        if (game.pieces(@enumToInt(to))) |_| {
+            is_capture = true;
+        }
+        // Assume that any pawn capture with an empty target is an en passant
+        if (moving_piece.piece_type == PieceType.pawn and bitboard.file(@enumToInt(from)) != bitboard.file(@enumToInt(to)) and !is_capture) {
+            is_en_passant = true;
+        }
+        if (game.active_color == Color.white and moving_piece.piece_type == PieceType.pawn and bitboard.rank(@enumToInt(to)) == 7 or
+            game.active_color == Color.black and moving_piece.piece_type == PieceType.pawn and bitboard.rank(@enumToInt(to)) == 0)
+        {
+            is_promotion = true;
+        }
+
+        var move_type = MoveType.QUIET;
+        if (is_castle_long) {
+            move_type = MoveType.CASTLE_LONG;
+        } else if (is_castle_short) {
+            move_type = MoveType.CASTLE_SHORT;
+        } else if (is_en_passant) {
+            move_type = MoveType.EN_PASSANT;
+        } else if (is_double_push) {
+            move_type = MoveType.DOUBLE_PUSH;
+        } else if (is_capture and is_promotion and promote_to == PieceType.queen) {
+            move_type = MoveType.CAPTURE_PROMOTE_QUEEN;
+        } else if (is_capture and is_promotion and promote_to == PieceType.rook) {
+            move_type = MoveType.CAPTURE_PROMOTE_ROOK;
+        } else if (is_capture and is_promotion and promote_to == PieceType.bishop) {
+            move_type = MoveType.CAPTURE_PROMOTE_BISHOP;
+        } else if (is_capture and is_promotion and promote_to == PieceType.knight) {
+            move_type = MoveType.CAPTURE_PROMOTE_KNIGHT;
+        } else if (is_promotion and promote_to == PieceType.queen) {
+            move_type = MoveType.PROMOTE_QUEEN;
+        } else if (is_promotion and promote_to == PieceType.rook) {
+            move_type = MoveType.PROMOTE_ROOK;
+        } else if (is_promotion and promote_to == PieceType.bishop) {
+            move_type = MoveType.PROMOTE_BISHOP;
+        } else if (is_promotion and promote_to == PieceType.knight) {
+            move_type = MoveType.PROMOTE_KNIGHT;
+        } else if (is_capture) {
+            move_type = MoveType.CAPTURE;
+        }
+
+        return Move{
+            .from = from,
+            .to = to,
+            .move_type = move_type,
+        };
     }
 };
 

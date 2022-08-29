@@ -8,6 +8,8 @@ pub const CommandTag = enum(u8) {
     // uci commands
     quit,
     newgame,
+    go,
+    stop,
     // non-standard uci commands
     eval,
     board,
@@ -16,6 +18,8 @@ pub const CommandTag = enum(u8) {
 pub const Command = union(CommandTag) {
     quit: void,
     newgame: void,
+    go,
+    stop,
     eval: void,
     board: void,
 };
@@ -32,18 +36,21 @@ var debug: bool = false;
 /// This complex command is then returned to be handled by the engine.
 pub fn next_command() !Command {
     var buffer = [1]u8{0} ** UCI_COMMAND_MAX_LENGTH;
-    const stdin = std.io.getStdIn();
-    const stdout = std.io.getStdOut();
+    const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
 
     while (true) {
-        const bytes_read = (try stdin.read(&buffer)) - 1;
-        const input = buffer[0..bytes_read];
+        const bytes_read = (try stdin.read(&buffer));
+        if (bytes_read == 0) continue;
+
+        const input = buffer[0 .. bytes_read - 1];
         var parts = std.mem.split(u8, input, " ");
         const command = parts.next().?;
         if (std.mem.eql(u8, command, "uci")) {
             // identify engine
             _ = try stdout.write("id name zigchess\n");
             _ = try stdout.write("id author Alaska\n");
+            _ = try stdout.write("\n");
             // send supported options (none)
             // confirm that we implement uci
             _ = try stdout.write("uciok\n");
@@ -60,6 +67,10 @@ pub fn next_command() !Command {
             _ = try stdout.write("readyok\n");
         } else if (std.mem.eql(u8, command, "ucinewgame")) {
             return Command.newgame;
+        } else if (std.mem.eql(u8, command, "go")) {
+            return Command.go;
+        } else if (std.mem.eql(u8, command, "stop")) {
+            return Command.stop;
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {
