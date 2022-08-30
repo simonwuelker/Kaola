@@ -4,10 +4,13 @@ const UCI_COMMAND_MAX_LENGTH = 1024;
 
 /// Note that these are not all uci commands, just the ones
 /// that cannot be trivially handled by next_command
-pub const CommandTag = enum(u8) {
+pub const GuiCommandTag = enum(u8) {
     // uci commands
+    uci,
+    isready,
     quit,
     newgame,
+    debug,
     go,
     stop,
     // non-standard uci commands
@@ -15,68 +18,74 @@ pub const CommandTag = enum(u8) {
     board,
 };
 
-pub const Command = union(CommandTag) {
-    quit: void,
-    newgame: void,
+pub const EngineCommandTag = enum(u8) {
+    uciok,
+    id,
+    readyok,
+};
+
+pub const GuiCommand = union(GuiCommandTag) {
+    uci,
+    isready,
+    quit,
+    newgame,
     go,
     stop,
-    eval: void,
-    board: void,
+    eval,
+    board,
+    debug: bool,
 };
 
-pub const UCIError = error{
-    InvalidCommand,
-    MissingArgument,
+pub const EngineCommand = union(EngineCommandTag) {
+    uciok: void,
+    id: struct { key: []const u8, value: []const u8 },
+    readyok: void,
 };
 
-var debug: bool = false;
+pub fn send_command(command: EngineCommand) !void {
+    const stdout = std.io.getStdOut().writer();
+    switch (command) {
+        EngineCommandTag.uciok => _ = try stdout.write("uciok\n"),
+        EngineCommandTag.id => |keyvalue| _ = try std.fmt.format(stdout, "id {s} {s}\n", keyvalue),
+        EngineCommandTag.readyok => _ = try stdout.write("readyok\n"),
+    }
+}
 
-/// Reads commands until it encounters one that cannot be trivially handled.
-/// (One that requires more than just printing static information)
-/// This complex command is then returned to be handled by the engine.
-pub fn next_command() !Command {
+pub fn next_command() !GuiCommand {
     var buffer = [1]u8{0} ** UCI_COMMAND_MAX_LENGTH;
     const stdin = std.io.getStdIn().reader();
-    const stdout = std.io.getStdOut().writer();
 
     while (true) {
-        const bytes_read = (try stdin.read(&buffer));
-        if (bytes_read == 0) continue;
+        const input = (try stdin.readUntilDelimiter(&buffer, '\n'));
+        if (input.len == 0) continue;
 
-        const input = buffer[0 .. bytes_read - 1];
         var parts = std.mem.split(u8, input, " ");
         const command = parts.next().?;
         if (std.mem.eql(u8, command, "uci")) {
-            // identify engine
-            _ = try stdout.write("id name zigchess\n");
-            _ = try stdout.write("id author Alaska\n");
-            _ = try stdout.write("\n");
-            // send supported options (none)
-            // confirm that we implement uci
-            _ = try stdout.write("uciok\n");
+            return GuiCommand.uci;
         } else if (std.mem.eql(u8, command, "debug")) {
-            const arg = parts.next() orelse return UCIError.MissingArgument;
+            const arg = parts.next() orelse continue;
             if (std.mem.eql(u8, arg, "on")) {
-                debug = true;
+                return GuiCommand{ .debug = true };
             } else if (std.mem.eql(u8, arg, "off")) {
-                debug = false;
-            }
+                return GuiCommand{ .debug = false };
+            } else continue;
         } else if (std.mem.eql(u8, command, "quit")) {
-            return Command.quit;
+            return GuiCommand.quit;
         } else if (std.mem.eql(u8, command, "isready")) {
-            _ = try stdout.write("readyok\n");
+            return GuiCommand.isready;
         } else if (std.mem.eql(u8, command, "ucinewgame")) {
-            return Command.newgame;
+            return GuiCommand.newgame;
         } else if (std.mem.eql(u8, command, "go")) {
-            return Command.go;
+            return GuiCommand.go;
         } else if (std.mem.eql(u8, command, "stop")) {
-            return Command.stop;
+            return GuiCommand.stop;
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {
-            return Command.eval;
+            return GuiCommand.eval;
         } else if (std.mem.eql(u8, command, "board")) {
-            return Command.board;
+            return GuiCommand.board;
         }
 
         // ignore unknown commands

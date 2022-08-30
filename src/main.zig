@@ -5,6 +5,9 @@ const movegen = @import("movegen.zig");
 const pesto = @import("pesto.zig");
 const searcher = @import("searcher.zig");
 const uci = @import("uci.zig");
+const GuiCommand = uci.GuiCommand;
+const EngineCommand = uci.EngineCommand;
+const send_command = uci.send_command;
 
 pub fn init() void {
     // init_magic_numbers();
@@ -19,21 +22,24 @@ pub fn main() !void {
     var game: Board = undefined;
     mainloop: while (true) {
         const command = try uci.next_command();
-        switch (command) {
-            uci.Command.quit => break :mainloop,
-            uci.Command.newgame => game = Board.starting_position(),
-            uci.Command.go => {},
-            uci.Command.stop => {},
-            uci.Command.board => game.print(),
-            uci.Command.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
-        }
+        try switch (command) {
+            GuiCommand.uci => {
+                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "zigchess" } });
+                try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } });
+                try send_command(EngineCommand.uciok);
+            },
+            GuiCommand.isready => send_command(EngineCommand.readyok),
+            GuiCommand.debug => {},
+            GuiCommand.quit => break :mainloop,
+            GuiCommand.newgame => game = Board.starting_position(),
+            GuiCommand.go => {
+                // const best_move = searcher.search(game, 3);
+            },
+            GuiCommand.stop => {},
+            GuiCommand.board => game.print(),
+            GuiCommand.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
+        };
     }
-    // var game = try board.Board.from_fen("8/7q/8/8/4Q3/8/P1K5/8 w - - 99 50");
-    // var game = board.Board.starting_position();
-    // game.print();
-    // std.debug.print("eval says {d}\n", .{pesto.evaluate(game)});
-    // game.apply(searcher.search(game));
-    // game.print();
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
