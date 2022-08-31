@@ -30,14 +30,16 @@ pub fn main() !void {
             },
             GuiCommand.isready => send_command(EngineCommand.readyok),
             GuiCommand.debug => {},
-            GuiCommand.quit => break :mainloop,
             GuiCommand.newgame => game = Board.starting_position(),
+            GuiCommand.position => |pos| game = try Board.from_fen(pos.fen),
             GuiCommand.go => {
-                // const best_move = searcher.search(game, 3);
+                const best_move = searcher.search(game, 3);
+                try send_command(EngineCommand{ .bestmove = best_move });
             },
             GuiCommand.stop => {},
             GuiCommand.board => game.print(),
             GuiCommand.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
+            GuiCommand.quit => break :mainloop,
         };
     }
 }

@@ -11,6 +11,8 @@ To aid with debugging, the engine supports some commands not defined in the UCI 
 * **eval:** return the evaluation of the current position
 
 ## Development
+A neat trick for debugging is creating a file with a sequence of uci commands and then 
+`cat commands.txt | ./zig-out/bin/zigchess`.
 
 ### Tests
 Run all unit tests using `zig build test`.

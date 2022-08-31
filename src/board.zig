@@ -4,6 +4,7 @@ const std = @import("std");
 const bitboard = @import("bitboard.zig");
 const bitops = @import("bitops.zig");
 const movegen = @import("movegen.zig");
+const zobrist = @import("zobrist.zig");
 const Move = movegen.Move;
 const MoveType = movegen.MoveType;
 
@@ -99,17 +100,32 @@ pub const PieceType = enum(u3) {
     rook,
     queen,
     king,
+
+    /// Build a piece with the desired color
+    pub fn color(self: *const PieceType, desired_color: Color) Piece {
+        std.debug.assert(desired_color != Color.both);
+        return @intToEnum(Piece, @as(u4, @enumToInt(self.*)) << 1 | @truncate(u1, @enumToInt(desired_color)));
+    }
 };
 
-pub const Piece = struct {
-    color: Color,
-    piece_type: PieceType,
+/// Last bit represents piece color, first three bits piece type
+pub const Piece = enum(u4) {
+    white_pawn = 0b0000,
+    black_pawn = 0b0001,
+    white_knight = 0b0010,
+    black_knight = 0b0011,
+    white_bishop = 0b0100,
+    black_bishop = 0b0101,
+    white_rook = 0b0110,
+    black_rook = 0b0111,
+    white_queen = 0b1000,
+    black_queen = 0b1001,
+    white_king = 0b1010,
+    black_king = 0b1011,
 
-    pub inline fn new(color: Color, piece_type: PieceType) Piece {
-        return Piece{
-            .color = color,
-            .piece_type = piece_type,
-        };
+    /// Get the piece color
+    pub fn color(self: *const Piece) Color {
+        return @intToEnum(Color, @enumToInt(self.*) & 1);
     }
 };
 
@@ -163,7 +179,7 @@ pub fn square_name(square: u6) [2]u8 {
 }
 
 pub const Board = struct {
-    bb_position: [2][6]u64,
+    bb_position: [12]u64,
     pieces: [64]?Piece,
     occupancies: [3]u64,
     active_color: Color,
@@ -171,10 +187,11 @@ pub const Board = struct {
     en_passant: ?u6,
     halfmove_counter: u8,
     fullmove_counter: u8,
+    zobrist_hash: u64,
 
     fn new() Board {
         return Board{
-            .bb_position = [1][6]u64{[1]u64{0} ** 6} ** 2,
+            .bb_position = [1]u64{0} ** 12,
             .pieces = [1]?Piece{null} ** 64,
             .occupancies = [1]u64{0} ** 3,
             .active_color = Color.white,
@@ -182,13 +199,14 @@ pub const Board = struct {
             .en_passant = null,
             .halfmove_counter = 0,
             .fullmove_counter = 0,
+            .zobrist_hash = 0,
         };
     }
 
     pub fn place_piece(self: *Board, piece: Piece, square: u6) void {
         const mask = @as(u64, 1) << square;
-        self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)] |= mask;
-        self.occupancies[@enumToInt(piece.color)] |= mask;
+        self.bb_position[@enumToInt(piece)] |= mask;
+        self.occupancies[@enumToInt(piece.color())] |= mask;
         self.occupancies[@enumToInt(Color.both)] |= mask;
         self.pieces[square] = piece;
     }
@@ -211,7 +229,7 @@ pub const Board = struct {
     }
 
     pub inline fn get_bitboard(self: *const Board, piece: Piece) u64 {
-        return self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)];
+        return self.bb_position[@enumToInt(piece)];
     }
 
     pub inline fn get_occupancies(self: *const Board, color: Color) u64 {
@@ -220,31 +238,37 @@ pub const Board = struct {
 
     /// Parse the board state from a FEN string
     pub fn from_fen(fen: []const u8) FenParseError!Board {
+        std.debug.print("fen '{s}'\n", .{fen});
         var board = Board.new();
         var parts = std.mem.split(u8, fen, " ");
 
         // Parse the board position
         const fen_position = parts.next().?;
+        std.debug.print("position '{s}'\n", .{fen_position});
         var ranks = std.mem.split(u8, fen_position, "/");
         var rank: u6 = 0;
         while (ranks.next()) |entry| {
+            std.debug.print("entry '{s}'\n", .{entry});
             var file: u6 = 0;
             for (entry) |c| {
                 switch (c) {
-                    'K' => board.place_piece(WHITE_KING, rank * 8 + file),
-                    'Q' => board.place_piece(WHITE_QUEEN, rank * 8 + file),
-                    'R' => board.place_piece(WHITE_ROOK, rank * 8 + file),
-                    'B' => board.place_piece(WHITE_BISHOP, rank * 8 + file),
-                    'N' => board.place_piece(WHITE_KNIGHT, rank * 8 + file),
-                    'P' => board.place_piece(WHITE_PAWN, rank * 8 + file),
-                    'k' => board.place_piece(BLACK_KING, rank * 8 + file),
-                    'q' => board.place_piece(BLACK_QUEEN, rank * 8 + file),
-                    'r' => board.place_piece(BLACK_ROOK, rank * 8 + file),
-                    'b' => board.place_piece(BLACK_BISHOP, rank * 8 + file),
-                    'n' => board.place_piece(BLACK_KNIGHT, rank * 8 + file),
-                    'p' => board.place_piece(BLACK_PAWN, rank * 8 + file),
+                    'K' => board.place_piece(Piece.white_king, rank * 8 + file),
+                    'Q' => board.place_piece(Piece.white_queen, rank * 8 + file),
+                    'R' => board.place_piece(Piece.white_rook, rank * 8 + file),
+                    'B' => board.place_piece(Piece.white_bishop, rank * 8 + file),
+                    'N' => board.place_piece(Piece.white_knight, rank * 8 + file),
+                    'P' => board.place_piece(Piece.white_pawn, rank * 8 + file),
+                    'k' => board.place_piece(Piece.black_king, rank * 8 + file),
+                    'q' => board.place_piece(Piece.black_queen, rank * 8 + file),
+                    'r' => board.place_piece(Piece.black_rook, rank * 8 + file),
+                    'b' => board.place_piece(Piece.black_bishop, rank * 8 + file),
+                    'n' => board.place_piece(Piece.black_knight, rank * 8 + file),
+                    'p' => board.place_piece(Piece.black_pawn, rank * 8 + file),
                     '1'...'8' => file += @intCast(u3, c - '1'),
-                    else => return FenParseError.InvalidPosition,
+                    else => {
+                        std.debug.print("invalid char '{d}'\n", .{c});
+                        return FenParseError.InvalidPosition;
+                    },
                 }
                 file += 1;
             }
@@ -306,16 +330,20 @@ pub const Board = struct {
 
                 var c: u8 = '.';
                 if (self.pieces[square]) |piece| {
-                    c = switch (piece.piece_type) {
-                        PieceType.pawn => 'P',
-                        PieceType.knight => 'N',
-                        PieceType.bishop => 'B',
-                        PieceType.rook => 'R',
-                        PieceType.queen => 'Q',
-                        PieceType.king => 'K',
+                    c = switch (piece) {
+                        Piece.white_pawn => 'P',
+                        Piece.white_knight => 'N',
+                        Piece.white_bishop => 'B',
+                        Piece.white_rook => 'R',
+                        Piece.white_queen => 'Q',
+                        Piece.white_king => 'K',
+                        Piece.black_pawn => 'p',
+                        Piece.black_knight => 'n',
+                        Piece.black_bishop => 'b',
+                        Piece.black_rook => 'r',
+                        Piece.black_queen => 'q',
+                        Piece.black_king => 'k',
                     };
-                    // lowercase for black pieces
-                    if (piece.color == Color.black) c += 0x20;
                 }
                 std.debug.print("{c} ", .{c});
             }
@@ -437,10 +465,10 @@ pub const Board = struct {
         var attacked: u64 = 0;
         const us = self.active_color;
         const them = us.other();
-        const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(Piece.new(us, PieceType.king));
+        const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(PieceType.king.color(us));
 
         // pawns
-        const opponent_pawns = self.get_bitboard(Piece.new(them, PieceType.pawn));
+        const opponent_pawns = self.get_bitboard(PieceType.pawn.color(them));
         if (them == Color.white) {
             attacked |= bitboard.white_pawn_attacks(opponent_pawns);
         } else {
@@ -448,28 +476,28 @@ pub const Board = struct {
         }
 
         // knights
-        var knights = self.get_bitboard(Piece.new(them, PieceType.knight));
+        var knights = self.get_bitboard(PieceType.knight.color(them));
         while (knights != 0) : (bitops.pop_ls1b(&knights)) {
             const square = bitboard.get_lsb_square(knights);
             attacked |= bitboard.knight_attacks(square);
         }
 
         // bishops
-        var diag_sliders = self.get_bitboard(Piece.new(them, PieceType.bishop)) | self.get_bitboard(Piece.new(them, PieceType.queen));
+        var diag_sliders = self.get_bitboard(PieceType.bishop.color(them)) | self.get_bitboard(PieceType.queen.color(them));
         while (diag_sliders != 0) : (bitops.pop_ls1b(&diag_sliders)) {
             const square = bitboard.get_lsb_square(diag_sliders);
             attacked |= bitboard.bishop_attacks(square, ALL_WITHOUT_KING);
         }
 
         // rooks
-        var straight_sliders = self.get_bitboard(Piece.new(them, PieceType.rook)) | self.get_bitboard(Piece.new(them, PieceType.queen));
+        var straight_sliders = self.get_bitboard(PieceType.rook.color(them)) | self.get_bitboard(PieceType.queen.color(them));
         while (straight_sliders != 0) : (bitops.pop_ls1b(&straight_sliders)) {
             const square = bitboard.get_lsb_square(straight_sliders);
             attacked |= bitboard.rook_attacks(square, ALL_WITHOUT_KING);
         }
 
         // king(s)
-        var kings = self.get_bitboard(Piece.new(them, PieceType.king));
+        var kings = self.get_bitboard(PieceType.king.color(them));
         while (kings != 0) : (bitops.pop_ls1b(&kings)) {
             const square = bitboard.get_lsb_square(kings);
             attacked |= bitboard.king_attacks(square);

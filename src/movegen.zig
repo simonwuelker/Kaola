@@ -79,6 +79,25 @@ pub const Move = struct {
         InvalidSquare,
     };
 
+    // Formats the move into long algebraic notation (e1e7, g7g8q)
+    pub fn to_str(move: *const Move) [5]u8 {
+        var move_str = [1]u8{0} ** 5;
+        std.mem.copy(u8, move_str[0..2], &board.square_name(move.from));
+        std.mem.copy(u8, move_str[2..4], &board.square_name(move.to));
+        move_str[4] = switch (move.move_type) {
+            MoveType.PROMOTE_QUEEN => 'q',
+            MoveType.CAPTURE_PROMOTE_QUEEN => 'q',
+            MoveType.PROMOTE_ROOK => 'r',
+            MoveType.CAPTURE_PROMOTE_ROOK => 'r',
+            MoveType.PROMOTE_BISHOP => 'b',
+            MoveType.CAPTURE_PROMOTE_BISHOP => 'b',
+            MoveType.PROMOTE_KNIGHT => 'n',
+            MoveType.CAPTURE_PROMOTE_KNIGHT => 'n',
+            else => 0,
+        };
+        return move_str;
+    }
+
     /// Move is assumed to be more or less correct, only limited safety checks are performed
     pub fn from_str(str: []const u8, game: board.Board) MoveParseError!Move {
         if (str.len != 4 and str.len != 5) return MoveParseError.InvalidLength;
@@ -186,9 +205,9 @@ const Pinmask = struct {
 pub fn generate_pinmask(game: board.Board) Pinmask {
     const us = game.active_color;
     const them = us.other();
-    const king_square = bitboard.get_lsb_square(game.get_bitboard(Piece.new(us, PieceType.king)));
-    const diag_attackers = game.get_bitboard(Piece.new(us, PieceType.bishop)) | game.get_bitboard(Piece.new(us, PieceType.queen));
-    const straight_attackers = game.get_bitboard(Piece.new(us, PieceType.rook)) | game.get_bitboard(Piece.new(them, PieceType.queen));
+    const king_square = bitboard.get_lsb_square(game.get_bitboard(PieceType.king.color(us)));
+    const diag_attackers = game.get_bitboard(PieceType.bishop.color(them)) | game.get_bitboard(PieceType.queen.color(them));
+    const straight_attackers = game.get_bitboard(PieceType.rook.color(them)) | game.get_bitboard(PieceType.queen.color(them));
 
     // diagonal pins
     const diag_blockers = bitboard.bishop_attacks(king_square, game.get_occupancies(Color.both)) & game.get_occupancies(us);
@@ -197,7 +216,7 @@ pub fn generate_pinmask(game: board.Board) Pinmask {
     var diag_pinmask: u64 = diag_pinners; // capturing the pinning piece is valid
     while (diag_pinners != 0) : (bitops.pop_ls1b(&diag_pinners)) {
         const pinner_square = bitboard.get_lsb_square(diag_pinners);
-        diag_pinmask |= diag_xray_attacks & bitboard.bishop_attacks(pinner_square, game.get_bitboard(Piece.new(us, PieceType.king)));
+        diag_pinmask |= diag_xray_attacks & bitboard.bishop_attacks(pinner_square, game.get_bitboard(PieceType.king.color(us)));
     }
 
     // straight pins
@@ -207,7 +226,7 @@ pub fn generate_pinmask(game: board.Board) Pinmask {
     var straight_pinmask: u64 = straight_pinners; // capturing the pinning piece is valid
     while (straight_pinners != 0) : (bitops.pop_ls1b(&straight_pinners)) {
         const pinner_square = bitboard.get_lsb_square(straight_pinners);
-        straight_pinmask |= straight_xray_attacks & bitboard.rook_attacks(pinner_square, game.get_bitboard(Piece.new(us, PieceType.king)));
+        straight_pinmask |= straight_xray_attacks & bitboard.rook_attacks(pinner_square, game.get_bitboard(PieceType.king.color(us)));
     }
 
     return Pinmask{
@@ -226,9 +245,9 @@ pub fn generate_pinmask(game: board.Board) Pinmask {
 pub fn generate_checkmask(game: board.Board) u64 {
     const us = game.active_color;
     const them = us.other();
-    const opponent_diag_sliders = game.get_bitboard(Piece.new(them, PieceType.bishop)) | game.get_bitboard(Piece.new(them, PieceType.queen));
-    const opponent_straight_sliders = game.get_bitboard(Piece.new(them, PieceType.rook)) | game.get_bitboard(Piece.new(them, PieceType.queen));
-    const king_square = bitboard.get_lsb_square(game.get_bitboard(Piece.new(us, PieceType.king)));
+    const opponent_diag_sliders = game.get_bitboard(PieceType.bishop.color(them)) | game.get_bitboard(PieceType.queen.color(them));
+    const opponent_straight_sliders = game.get_bitboard(PieceType.rook.color(them)) | game.get_bitboard(PieceType.queen.color(them));
+    const king_square = bitboard.get_lsb_square(game.get_bitboard(PieceType.king.color(us)));
 
     var checkmask: u64 = 0;
     var in_check: bool = false;
@@ -249,7 +268,7 @@ pub fn generate_checkmask(game: board.Board) u64 {
         in_check = true;
     }
 
-    const attacking_knight = bitboard.knight_attack(king_square) & game.get_bitboard(Piece.new(them, PieceType.knight));
+    const attacking_knight = bitboard.knight_attack(king_square) & game.get_bitboard(PieceType.knight.color(them));
     if (attacking_knight != 0) {
         const knight_square = bitboard.get_lsb_square(attacking_knight);
         checkmask |= bitboard.PATH_BETWEEN_SQUARES[knight_square][king_square];
@@ -258,8 +277,8 @@ pub fn generate_checkmask(game: board.Board) u64 {
     }
 
     const attacking_pawns = switch (us) {
-        Color.white => bitboard.white_pawn_attacks(game.get_bitboard(Piece.new(us, PieceType.king))) & game.get_bitboard(Piece.new(them, PieceType.pawn)),
-        Color.black => bitboard.black_pawn_attacks(game.get_bitboard(Piece.new(us, PieceType.king))) & game.get_bitboard(Piece.new(them, PieceType.pawn)),
+        Color.white => bitboard.white_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(us)),
+        Color.black => bitboard.black_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(us)),
         else => unreachable,
     };
     if (attacking_pawns != 0) {
@@ -277,8 +296,8 @@ pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
     const us = game.active_color;
     const them = us.other();
     const king_unsafe_squares = game.king_unsafe_squares();
-    const diag_sliders = game.get_bitboard(Piece.new(us, PieceType.bishop)) | game.get_bitboard(Piece.new(us, PieceType.queen));
-    const straight_sliders = game.get_bitboard(Piece.new(us, PieceType.rook)) | game.get_bitboard(Piece.new(us, PieceType.queen));
+    const diag_sliders = game.get_bitboard(PieceType.bishop.color(us)) | game.get_bitboard(PieceType.queen.color(us));
+    const straight_sliders = game.get_bitboard(PieceType.rook.color(us)) | game.get_bitboard(PieceType.queen.color(us));
     const enemy_or_empty = ~game.get_occupancies(us);
     const enemy = game.get_occupancies(them);
     const empty = ~game.get_occupancies(Color.both);
@@ -286,7 +305,7 @@ pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
     const pinmask = generate_pinmask(game);
 
     // legal king moves
-    const king_board = game.get_bitboard(Piece.new(us, PieceType.king));
+    const king_board = game.get_bitboard(PieceType.king.color(us));
     const king_attacks = bitboard.king_attacks(king_board);
     emit_all(bitboard.get_lsb_square(king_board), king_attacks & empty, emit, MoveType.QUIET);
     emit_all(bitboard.get_lsb_square(king_board), king_attacks & enemy, emit, MoveType.CAPTURE);
@@ -296,7 +315,7 @@ pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
 
     // legal knight moves
     // pinned knights can never move
-    var unpinned_knights = game.get_bitboard(Piece.new(us, PieceType.knight)) & ~pinmask.both;
+    var unpinned_knights = game.get_bitboard(PieceType.knight.color(us)) & ~pinmask.both;
     while (unpinned_knights != 0) : (bitops.pop_ls1b(&unpinned_knights)) {
         const square = @truncate(u6, @ctz(u64, unpinned_knights));
         const moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
@@ -355,7 +374,7 @@ pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
 }
 
 fn white_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
-    const king = game.get_bitboard(Piece.new(Color.white, PieceType.king));
+    const king = game.get_bitboard(Piece.white_king);
     if (king & king_unsafe_squares != 0) return; // cannot castle either way when in check
 
     // The squares we traverse must not be in check or occupied
@@ -380,7 +399,7 @@ fn white_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64)
 }
 
 fn black_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
-    const king = game.get_bitboard(Piece.new(Color.black, PieceType.king));
+    const king = game.get_bitboard(Piece.black_king);
     if (king & king_unsafe_squares != 0) return; // cannot castle either way when in check
 
     // The squares we traverse must not be in check or occupied
@@ -410,7 +429,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     // pushing => move pawn two squares
     // moving/pushing uses the straight pinmask, capturing the diagonal one (like a queen)
     const empty = ~game.get_occupancies(Color.both);
-    const white_pawns = game.get_bitboard(Piece.new(Color.white, PieceType.pawn));
+    const white_pawns = game.get_bitboard(Piece.white_pawn);
 
     // pawn moves
     var legal_pawn_moves: u64 = 0;

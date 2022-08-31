@@ -152,18 +152,18 @@ const ENDGAME_TABLE = [6][64]i16{
 
 const GAMEPHASE_INCREMENT = [12]u8{ 0, 0, 1, 1, 1, 1, 2, 2, 4, 4, 0, 0 };
 
-var midgame_table: [2][6][64]i16 = undefined;
-var endgame_table: [2][6][64]i16 = undefined;
+var midgame_table: [12][64]i16 = undefined;
+var endgame_table: [12][64]i16 = undefined;
 
 pub fn init_tables() void {
-    var piece: u3 = 0;
-    while (piece < 6) : (piece += 1) {
+    var piece: u5 = 0;
+    while (piece < 6) : (piece += 2) {
         var square: u7 = 0;
         while (square < 64) : (square += 1) {
-            midgame_table[0][piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][square];
-            endgame_table[0][piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][square];
-            midgame_table[1][piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][flip(square)];
-            endgame_table[1][piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][flip(square)];
+            midgame_table[2 * piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][square];
+            endgame_table[2 * piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][square];
+            midgame_table[2 * piece + 1][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][flip(square)];
+            endgame_table[2 * piece + 1][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][flip(square)];
         }
     }
 }
@@ -179,11 +179,10 @@ pub fn evaluate(game: board.Board) i16 {
     var square: u7 = 0;
     while (square < 64) : (square += 1) {
         if (game.pieces[square]) |piece| {
-            const color = @enumToInt(piece.color);
-            const piece_type = @enumToInt(piece.piece_type);
-            midgame[color] += midgame_table[color][piece_type][square];
-            endgame[color] += endgame_table[color][piece_type][square];
-            gamephase += GAMEPHASE_INCREMENT[piece_type];
+            const color = @enumToInt(piece.color());
+            midgame[color] += midgame_table[@enumToInt(piece)][square];
+            endgame[color] += endgame_table[@enumToInt(piece)][square];
+            gamephase += GAMEPHASE_INCREMENT[@enumToInt(piece)];
         }
     }
 

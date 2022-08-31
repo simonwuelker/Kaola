@@ -1,5 +1,6 @@
 //! Implements the Universal chess interface
 const std = @import("std");
+const Move = @import("movegen.zig").Move;
 const UCI_COMMAND_MAX_LENGTH = 1024;
 
 /// Note that these are not all uci commands, just the ones
@@ -10,6 +11,7 @@ pub const GuiCommandTag = enum(u8) {
     isready,
     quit,
     newgame,
+    position,
     debug,
     go,
     stop,
@@ -22,6 +24,7 @@ pub const EngineCommandTag = enum(u8) {
     uciok,
     id,
     readyok,
+    bestmove,
 };
 
 pub const GuiCommand = union(GuiCommandTag) {
@@ -33,6 +36,10 @@ pub const GuiCommand = union(GuiCommandTag) {
     stop,
     eval,
     board,
+    position: struct {
+        fen: []const u8,
+        moves: []const u8,
+    },
     debug: bool,
 };
 
@@ -40,6 +47,7 @@ pub const EngineCommand = union(EngineCommandTag) {
     uciok: void,
     id: struct { key: []const u8, value: []const u8 },
     readyok: void,
+    bestmove: Move,
 };
 
 pub fn send_command(command: EngineCommand) !void {
@@ -48,6 +56,7 @@ pub fn send_command(command: EngineCommand) !void {
         EngineCommandTag.uciok => _ = try stdout.write("uciok\n"),
         EngineCommandTag.id => |keyvalue| _ = try std.fmt.format(stdout, "id {s} {s}\n", keyvalue),
         EngineCommandTag.readyok => _ = try stdout.write("readyok\n"),
+        EngineCommandTag.bestmove => |move| _ = try std.fmt.format(stdout, "bestmove {s}\n", .{move.to_str()}),
     }
 }
 
@@ -80,6 +89,21 @@ pub fn next_command() !GuiCommand {
             return GuiCommand.go;
         } else if (std.mem.eql(u8, command, "stop")) {
             return GuiCommand.stop;
+        } else if (std.mem.eql(u8, command, "position")) {
+            const pos = if (std.mem.indexOf(u8, input, "moves")) |index| poswithmoves: {
+                break :poswithmoves std.mem.trim(u8, input[command.len..index], " ");
+            } else poswithoutmoves: {
+                break :poswithoutmoves std.mem.trim(u8, input[command.len..], " ");
+            };
+            const fen = if (std.mem.eql(u8, pos, "startpos")) default: {
+                break :default "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+            } else fen: {
+                break :fen pos;
+            };
+            return GuiCommand{ .position = .{
+                .fen = fen,
+                .moves = "",
+            } };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {

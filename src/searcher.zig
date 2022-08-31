@@ -5,7 +5,7 @@ const pesto = @import("pesto.zig");
 const Move = movegen.Move;
 
 var moves: [64]Move = undefined;
-var num_moves = undefined;
+var num_moves: u8 = undefined;
 
 // ultimately, i want to do the alpha-beta search *in here*
 // so we can evaluate moves *while* we generate them
@@ -15,11 +15,11 @@ fn callback(move: Move) void {
     num_moves += 1;
 }
 
-/// Determines the max score that can be reached in a given position using alpha-beta search
+/// Determines the max score that can be reached in a given position
 fn max_score(board: Board, depth: u8) i16 {
     if (depth == 0) return pesto.evaluate(board);
     num_moves = 0;
-    var best_score = -100; // something low, idk
+    var best_score: i16 = -100; // something low, idk
     movegen.generate_moves(board, callback);
     for (moves[0..num_moves]) |move| {
         var modified = board;
@@ -33,16 +33,18 @@ fn max_score(board: Board, depth: u8) i16 {
 pub fn search(board: Board, depth: u8) Move {
     num_moves = 0;
     movegen.generate_moves(board, callback);
-    var best_move = undefined;
-    var best_score = -100;
-    for (moves[0..num_moves]) |move| {
-        var modified = board;
-        modified.apply(move);
-        const score = max_score(modified, depth - 1);
-        if (best_score < score) {
-            best_move = move;
-            best_score = score;
-        }
-    }
-    return best_move;
+    _ = depth;
+    return moves[0];
+    // var best_move: Move = undefined;
+    // var best_score: i16 = -100;
+    // for (moves[0..num_moves]) |move| {
+    //     var modified = board;
+    //     modified.apply(move);
+    //     const score = max_score(modified, depth - 1);
+    //     if (best_score < score) {
+    //         best_move = move;
+    //         best_score = score;
+    //     }
+    // }
+    // return best_move;
 }
