@@ -58,19 +58,11 @@ pub const MoveType = enum(u4) {
 
 pub const Move = struct {
     /// Source square
-    from: u6,
+    from: Square,
     /// Target square
-    to: u6,
+    to: Square,
     /// Move properties
     move_type: MoveType,
-
-    pub fn quiet(from: u6, to: u6) Move {
-        return Move{
-            .from = from,
-            .to = to,
-            .move_type = MoveType.QUIET,
-        };
-    }
 
     const MoveParseError = error{
         NoPieceFound,
@@ -82,8 +74,8 @@ pub const Move = struct {
     // Formats the move into long algebraic notation (e1e7, g7g8q)
     pub fn to_str(move: *const Move) [5]u8 {
         var move_str = [1]u8{0} ** 5;
-        std.mem.copy(u8, move_str[0..2], &board.square_name(move.from));
-        std.mem.copy(u8, move_str[2..4], &board.square_name(move.to));
+        std.mem.copy(u8, move_str[0..2], move.from.to_str()[0..2]);
+        std.mem.copy(u8, move_str[2..4], move.to.to_str()[0..2]);
         move_str[4] = switch (move.move_type) {
             MoveType.PROMOTE_QUEEN => 'q',
             MoveType.CAPTURE_PROMOTE_QUEEN => 'q',
@@ -256,14 +248,14 @@ pub fn generate_checkmask(game: board.Board) u64 {
     const attacking_diag_slider = bitboard.bishop_attacks(king_square, game.get_occupancies(Color.both)) & opponent_diag_sliders;
     if (attacking_diag_slider != 0) {
         const attacker_square = bitboard.get_lsb_square(attacking_diag_slider);
-        checkmask |= bitboard.PATH_BETWEEN_SQUARES[attacker_square][king_square];
+        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
         in_check = true;
     }
 
     const attacking_straight_slider = bitboard.rook_attacks(king_square, game.get_occupancies(Color.both)) & opponent_straight_sliders;
     if (attacking_straight_slider != 0) {
         const attacker_square = bitboard.get_lsb_square(attacking_straight_slider);
-        checkmask |= bitboard.PATH_BETWEEN_SQUARES[attacker_square][king_square];
+        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
@@ -271,19 +263,19 @@ pub fn generate_checkmask(game: board.Board) u64 {
     const attacking_knight = bitboard.knight_attack(king_square) & game.get_bitboard(PieceType.knight.color(them));
     if (attacking_knight != 0) {
         const knight_square = bitboard.get_lsb_square(attacking_knight);
-        checkmask |= bitboard.PATH_BETWEEN_SQUARES[knight_square][king_square];
+        checkmask |= @as(u64, 1) << @enumToInt(knight_square);
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
 
     const attacking_pawns = switch (us) {
-        Color.white => bitboard.white_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(us)),
-        Color.black => bitboard.black_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(us)),
+        Color.white => bitboard.white_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(them)),
+        Color.black => bitboard.black_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(them)),
         else => unreachable,
     };
     if (attacking_pawns != 0) {
-        const pawn_square = @truncate(u6, @ctz(u64, attacking_pawns));
-        checkmask |= @as(u64, 1) << pawn_square;
+        const pawn_square = bitboard.get_lsb_square(attacking_pawns);
+        checkmask |= pawn_square.as_board();
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
@@ -317,7 +309,7 @@ pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
     // pinned knights can never move
     var unpinned_knights = game.get_bitboard(PieceType.knight.color(us)) & ~pinmask.both;
     while (unpinned_knights != 0) : (bitops.pop_ls1b(&unpinned_knights)) {
-        const square = @truncate(u6, @ctz(u64, unpinned_knights));
+        const square = bitboard.get_lsb_square(unpinned_knights);
         const moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
         emit_all(square, moves & empty, emit, MoveType.QUIET);
         emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
@@ -383,16 +375,16 @@ fn white_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64)
     const kingside_blockers = travel_blockers & WHITE_KINGSIDE;
     if (game.castling_rights.white_queenside and queenside_blockers == 0) {
         emit(Move{
-            .from = 0,
-            .to = 0,
+            .from = Square.A8,
+            .to = Square.A8,
             .move_type = MoveType.CASTLE_LONG,
         });
     }
 
     if (game.castling_rights.white_kingside and kingside_blockers == 0) {
         emit(Move{
-            .from = 0,
-            .to = 0,
+            .from = Square.A8,
+            .to = Square.A8,
             .move_type = MoveType.CASTLE_SHORT,
         });
     }
@@ -408,16 +400,16 @@ fn black_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64)
     const kingside_blockers = travel_blockers & BLACK_KINGSIDE;
     if (game.castling_rights.black_queenside and queenside_blockers == 0) {
         emit(Move{
-            .from = 0,
-            .to = 0,
+            .from = Square.A8,
+            .to = Square.A8,
             .move_type = MoveType.CASTLE_LONG,
         });
     }
 
     if (game.castling_rights.black_kingside and kingside_blockers == 0) {
         emit(Move{
-            .from = 0,
-            .to = 0,
+            .from = Square.A8,
+            .to = Square.A8,
             .move_type = MoveType.CASTLE_SHORT,
         });
     }
@@ -445,7 +437,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     while (legal_pawn_moves != 0) : (bitops.pop_ls1b(&legal_pawn_moves)) {
         const to = bitboard.get_lsb_square(legal_pawn_moves);
         emit(Move{
-            .from = to + 8,
+            .from = to.down_one(),
             .to = to,
             .move_type = MoveType.QUIET,
         });
@@ -457,7 +449,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     while (pawn_pushes != 0) : (bitops.pop_ls1b(&pawn_pushes)) {
         const to = bitboard.get_lsb_square(pawn_pushes);
         emit(Move{
-            .from = to + 16,
+            .from = to.down_two(),
             .to = to,
             .move_type = MoveType.QUIET,
         });
@@ -482,7 +474,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     while (left_captures != 0) : (bitops.pop_ls1b(&left_captures)) {
         const to = bitboard.get_lsb_square(left_captures);
         emit(Move{
-            .from = to + 9,
+            .from = to.down_right(),
             .to = to,
             .move_type = MoveType.CAPTURE,
         });
@@ -491,7 +483,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     while (right_captures != 0) : (bitops.pop_ls1b(&right_captures)) {
         const to = bitboard.get_lsb_square(right_captures);
         emit(Move{
-            .from = to + 7,
+            .from = to.down_left(),
             .to = to,
             .move_type = MoveType.CAPTURE,
         });
@@ -499,7 +491,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
 }
 
 /// Utility tool for emitting multiple moves with a common move type
-inline fn emit_all(from: u6, targets: u64, emit: MoveCallback, move_type: MoveType) void {
+inline fn emit_all(from: Square, targets: u64, emit: MoveCallback, move_type: MoveType) void {
     var remaining_targets = targets;
     while (remaining_targets != 0) : (bitops.pop_ls1b(&remaining_targets)) {
         const to = bitboard.get_lsb_square(remaining_targets);

@@ -22,75 +22,73 @@ const BLACK_BISHOP = Piece.new(Color.black, PieceType.bishop);
 const BLACK_KNIGHT = Piece.new(Color.black, PieceType.knight);
 const BLACK_PAWN = Piece.new(Color.black, PieceType.pawn);
 
-const Square = enum(u6) {
-    A8,
-    B8,
-    C8,
-    D8,
-    E8,
-    F8,
-    G8,
-    H8,
-    A7,
-    B7,
-    C7,
-    D7,
-    E7,
-    F7,
-    G7,
-    H7,
-    A6,
-    B6,
-    C6,
-    D6,
-    E6,
-    F6,
-    G6,
-    H6,
-    A5,
-    B5,
-    C5,
-    D5,
-    E5,
-    F5,
-    G5,
-    H5,
-    A4,
-    B4,
-    C4,
-    D4,
-    E4,
-    F4,
-    G4,
-    H4,
-    A3,
-    B3,
-    C3,
-    D3,
-    E3,
-    F3,
-    G3,
-    H3,
-    A2,
-    B2,
-    C2,
-    D2,
-    E2,
-    F2,
-    G2,
-    H2,
-    A1,
-    B1,
-    C1,
-    D1,
-    E1,
-    F1,
-    G1,
-    H1,
+// Squares on a chess board
+pub const Square = enum(u6) {
+    // zig fmt: off
+    A8, B8, C8, D8, E8, F8, G8, H8,
+    A7, B7, C7, D7, E7, F7, G7, H7,
+    A6, B6, C6, D6, E6, F6, G6, H6,
+    A5, B5, C5, D5, E5, F5, G5, H5,
+    A4, B4, C4, D4, E4, F4, G4, H4,
+    A3, B3, C3, D3, E3, F3, G3, H3,
+    A2, B2, C2, D2, E2, F2, G2, H2,
+    A1, B1, C1, D1, E1, F1, G1, H1,
+    // zig fmt: on
 
-    pub fn from_str(str: []const u8) Square {
+    pub inline fn from_str(str: []const u8) Square {
         return @intToEnum(Square, ('8' - str[1]) * 8 + (str[0] - 'a'));
     }
+
+    pub inline fn as_board(self: *const Square) u64 {
+        return @as(u64, 1) << @enumToInt(self.*);
+    }
+
+    pub inline fn to_str(self: *const Square) [:0]const u8 {
+        return SQUARE_NAME[@enumToInt(self.*)];
+    }
+
+    pub inline fn file(self: *const Square) u3 {
+        return @intCast(u3, @enumToInt(self.*) & 0b111);
+    }
+
+    pub inline fn rank(self: *const Square) u3 {
+        return @intCast(u3, @enumToInt(self.*) >> 3);
+    }
+
+    pub inline fn down_one(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) + 8);
+    }
+
+    pub inline fn up_one(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) - 8);
+    }
+
+    pub inline fn down_two(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) + 16);
+    }
+
+    pub inline fn up_two(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) - 16);
+    }
+
+    pub inline fn down_left(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) + 7);
+    }
+
+    pub inline fn down_right(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) + 9);
+    }
+};
+
+const SQUARE_NAME = [64][:0]const u8{
+    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
+    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
+    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
+    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
+    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
+    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
+    "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
+    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
 };
 
 pub const PieceType = enum(u3) {
@@ -170,14 +168,6 @@ const FenParseError = error{
     InvalidFullMoveCounter,
 };
 
-/// Return the square name (e.g 0 becomes "a8")
-pub fn square_name(square: u6) [2]u8 {
-    var name: [2]u8 = undefined;
-    name[0] = @intCast(u8, square % 8) + 'a';
-    name[1] = '8' - @intCast(u8, square / 8);
-    return name;
-}
-
 pub const Board = struct {
     bb_position: [12]u64,
     pieces: [64]?Piece,
@@ -238,17 +228,14 @@ pub const Board = struct {
 
     /// Parse the board state from a FEN string
     pub fn from_fen(fen: []const u8) FenParseError!Board {
-        std.debug.print("fen '{s}'\n", .{fen});
         var board = Board.new();
         var parts = std.mem.split(u8, fen, " ");
 
         // Parse the board position
         const fen_position = parts.next().?;
-        std.debug.print("position '{s}'\n", .{fen_position});
         var ranks = std.mem.split(u8, fen_position, "/");
         var rank: u6 = 0;
         while (ranks.next()) |entry| {
-            std.debug.print("entry '{s}'\n", .{entry});
             var file: u6 = 0;
             for (entry) |c| {
                 switch (c) {
@@ -266,7 +253,6 @@ pub const Board = struct {
                     'p' => board.place_piece(Piece.black_pawn, rank * 8 + file),
                     '1'...'8' => file += @intCast(u3, c - '1'),
                     else => {
-                        std.debug.print("invalid char '{d}'\n", .{c});
                         return FenParseError.InvalidPosition;
                     },
                 }
@@ -479,7 +465,7 @@ pub const Board = struct {
         var knights = self.get_bitboard(PieceType.knight.color(them));
         while (knights != 0) : (bitops.pop_ls1b(&knights)) {
             const square = bitboard.get_lsb_square(knights);
-            attacked |= bitboard.knight_attacks(square);
+            attacked |= bitboard.knight_attacks(square.as_board());
         }
 
         // bishops
@@ -499,8 +485,7 @@ pub const Board = struct {
         // king(s)
         var kings = self.get_bitboard(PieceType.king.color(them));
         while (kings != 0) : (bitops.pop_ls1b(&kings)) {
-            const square = bitboard.get_lsb_square(kings);
-            attacked |= bitboard.king_attacks(square);
+            attacked |= bitboard.king_attacks(kings);
         }
         return attacked;
     }

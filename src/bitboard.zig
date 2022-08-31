@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const bitops = @import("bitops.zig");
+const Square = @import("board.zig").Square;
 const rand = @import("rand.zig");
 const magics = @import("magics.zig");
 
@@ -25,6 +26,7 @@ pub fn print_bitboard(board: u64, title: []const u8) void {
 }
 
 const BISHOP_RELEVANT_BITS = [64]u6{
+    // zig fmt: off
     6, 5, 5, 5, 5, 5, 5, 6,
     5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 7, 7, 7, 7, 5, 5,
@@ -33,9 +35,11 @@ const BISHOP_RELEVANT_BITS = [64]u6{
     5, 5, 7, 7, 7, 7, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5,
     6, 5, 5, 5, 5, 5, 5, 6,
+    // zig fmt: on
 };
 
 const ROOK_RELEVANT_BITS = [64]u6{
+    // zig fmt: off
     12, 11, 11, 11, 11, 11, 11, 12,
     11, 10, 10, 10, 10, 10, 10, 11,
     11, 10, 10, 10, 10, 10, 10, 11,
@@ -44,6 +48,7 @@ const ROOK_RELEVANT_BITS = [64]u6{
     11, 10, 10, 10, 10, 10, 10, 11,
     11, 10, 10, 10, 10, 10, 10, 11,
     12, 11, 11, 11, 11, 11, 11, 12,
+    // zig fmt: on
 };
 
 /// Bit mask for masking off the A file
@@ -63,52 +68,52 @@ const NOT_AH_FILE: u64 = 0x7e7e7e7e7e7e7e7e;
 /// Bit mask for masking off the outer ranks
 const NOT_FIRST_OR_EIGTH_RANK: u64 = 0xffffffffffff00;
 
-fn bitboard_distance_to_edge(field: u6, shift: i5) u3 {
+fn bitboard_distance_to_edge(square: Square, shift: i5) u3 {
     return switch (shift) {
-        1 => @as(u3, 7) - file(field),
-        -1 => file(field),
-        8 => @as(u3, 7) - rank(field),
-        -8 => rank(field),
-        9 => std.math.min(@as(u3, 7) - file(field), @as(u6, 7) - rank(field)),
-        -7 => std.math.min(@as(u3, 7) - file(field), rank(field)),
-        -9 => std.math.min(file(field), rank(field)),
-        7 => std.math.min(file(field), @as(u3, 7) - rank(field)),
+        1 => @as(u3, 7) - square.file(),
+        -1 => square.file(),
+        8 => @as(u3, 7) - square.rank(),
+        -8 => square.rank(),
+        9 => std.math.min(@as(u3, 7) - square.file(), @as(u6, 7) - square.rank()),
+        -7 => std.math.min(@as(u3, 7) - square.file(), square.rank()),
+        -9 => std.math.min(square.file(), square.rank()),
+        7 => std.math.min(square.file(), @as(u3, 7) - square.rank()),
         else => unreachable,
     };
 }
 
 /// Get the index of the least significant bit in a bitboard.
 /// Causes undefined behaviour if the bitboard has no bit set.
-pub inline fn get_lsb_square(board: u64) u6 {
+pub inline fn get_lsb_square(board: u64) Square {
     std.debug.assert(board != 0);
-    return @truncate(u6, @ctz(u64, board));
+    return @intToEnum(Square, @ctz(u64, board));
 }
 
-fn attacks_in_direction(start: u6, signed_shift: i5, blocked: u64) u64 {
+fn attacks_in_direction(start: Square, signed_shift: i5, blocked: u64) u64 {
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
     const negative_shift = if (signed_shift < 0) true else false;
     const shift: u5 = std.math.absCast(signed_shift);
-    var field = start;
+    var square = @enumToInt(start);
     var attack_mask: u64 = 0;
     var i: u3 = 0;
-    while (i < max_moves and (blocked >> field) & 1 == 0) : (i += 1) {
-        if (negative_shift) field -= shift else field += shift;
-        attack_mask |= @as(u64, 1) << field;
+    while (i < max_moves and (blocked >> square) & 1 == 0) : (i += 1) {
+        if (negative_shift) square -= shift else square += shift;
+        attack_mask |= @as(u64, 1) << square;
     }
     return attack_mask;
 }
 
-fn mask_in_direction(start: u6, signed_shift: i5) u64 {
+fn mask_in_direction(start: Square, signed_shift: i5) u64 {
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
     if (max_moves == 0) return 0;
     const negative_shift = if (signed_shift < 0) true else false;
     const shift: u5 = std.math.absCast(signed_shift);
-    var field = start;
+    var square = @enumToInt(start);
     var mask: u64 = 0;
     var i: u3 = 0;
     while (i < max_moves - 1) : (i += 1) {
-        if (negative_shift) field -= shift else field += shift;
-        mask |= @as(u64, 1) << field;
+        if (negative_shift) square -= shift else square += shift;
+        mask |= @as(u64, 1) << square;
     }
     return mask;
 }
@@ -156,8 +161,8 @@ pub fn king_attacks(board: u64) u64 {
     | ((board & NOT_A_FILE) << 7); // down left
 }
 
-pub fn knight_attack(field: u6) u64 {
-    const board: u64 = @as(u64, 1) << field;
+pub fn knight_attack(field: Square) u64 {
+    const board: u64 = @as(u64, 1) << @enumToInt(field);
     return knight_attacks(board);
 }
 
@@ -174,39 +179,39 @@ pub fn knight_attacks(board: u64) u64 {
 }
 
 /// Determine the positions whose occupancy is relevant to the moves a bishop can make
-fn bishop_relevant_positions(field: u6) u64 {
+fn bishop_relevant_positions(square: Square) u64 {
     var board: u64 = 0;
-    board |= mask_in_direction(field, 7);
-    board |= mask_in_direction(field, -7);
-    board |= mask_in_direction(field, 9);
-    board |= mask_in_direction(field, -9);
+    board |= mask_in_direction(square, 7);
+    board |= mask_in_direction(square, -7);
+    board |= mask_in_direction(square, 9);
+    board |= mask_in_direction(square, -9);
     return board;
 }
 
 /// Determine the positions whose occupancy is relevant to the moves a rook can make
-fn rook_relevant_positions(field: u6) u64 {
+fn rook_relevant_positions(square: Square) u64 {
     var board: u64 = 0;
-    board |= (A_FILE << field % 8) & NOT_FIRST_OR_EIGTH_RANK;
-    board |= (EIGTH_RANK << (field & ~@as(u6, 7))) & NOT_AH_FILE;
-    board ^= @as(u64, 1) << field;
+    board |= (A_FILE << square.file()) & NOT_FIRST_OR_EIGTH_RANK;
+    board |= (EIGTH_RANK << (square.rank())) & NOT_AH_FILE;
+    board ^= square.as_board(); // the rooks position itself is not relevant
     return board;
 }
 
-fn generate_bishop_attacks(field: u6, blocked: u64) u64 {
+fn generate_bishop_attacks(square: Square, blocked: u64) u64 {
     var board: u64 = 0;
-    board |= attacks_in_direction(field, 7, blocked);
-    board |= attacks_in_direction(field, -7, blocked);
-    board |= attacks_in_direction(field, 9, blocked);
-    board |= attacks_in_direction(field, -9, blocked);
+    board |= attacks_in_direction(square, 7, blocked);
+    board |= attacks_in_direction(square, -7, blocked);
+    board |= attacks_in_direction(square, 9, blocked);
+    board |= attacks_in_direction(square, -9, blocked);
     return board;
 }
 
-fn generate_rook_attacks(field: u6, blocked: u64) u64 {
+fn generate_rook_attacks(square: Square, blocked: u64) u64 {
     var board: u64 = 0;
-    board |= attacks_in_direction(field, 8, blocked);
-    board |= attacks_in_direction(field, -8, blocked);
-    board |= attacks_in_direction(field, 1, blocked);
-    board |= attacks_in_direction(field, -1, blocked);
+    board |= attacks_in_direction(square, 8, blocked);
+    board |= attacks_in_direction(square, -8, blocked);
+    board |= attacks_in_direction(square, 1, blocked);
+    board |= attacks_in_direction(square, -1, blocked);
     return board;
 }
 
@@ -292,89 +297,86 @@ fn init_magic_numbers() void {
 }
 
 pub fn init_slider_attacks() void {
-    var square: u6 = 0;
-    while (square < 63) : (square += 1) {
+    var square_index: u6 = 0;
+    while (square_index < 63) : (square_index += 1) {
+        const square = @intToEnum(Square, square_index);
         const relevant_positions = bishop_relevant_positions(square);
-        bishop_blocking_positions[square] = relevant_positions;
-        const num_positions: u6 = BISHOP_RELEVANT_BITS[square];
+        bishop_blocking_positions[square_index] = relevant_positions;
+        const num_positions: u6 = BISHOP_RELEVANT_BITS[square_index];
         var index: u64 = 0;
         while (index < @as(u64, 1) << num_positions) : (index += 1) {
             const blocked: u64 = populate_occupancy_map(index, relevant_positions, num_positions);
-            const hash = (blocked *% magics.BISHOP_MAGIC_NUMBERS[square]) >> (~num_positions + 1);
-            bishop_attack_table[square][hash] = generate_bishop_attacks(square, blocked);
+            const hash = (blocked *% magics.BISHOP_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
+            bishop_attack_table[square_index][hash] = generate_bishop_attacks(square, blocked);
         }
     }
-    square = 0;
-    while (square < 63) : (square += 1) {
+    square_index = 0;
+    while (square_index < 63) : (square_index += 1) {
+        const square = @intToEnum(Square, square_index);
         const relevant_positions = rook_relevant_positions(square);
-        rook_blocking_positions[square] = relevant_positions;
-        const num_positions: u6 = ROOK_RELEVANT_BITS[square];
+        rook_blocking_positions[square_index] = relevant_positions;
+        const num_positions: u6 = ROOK_RELEVANT_BITS[square_index];
         var index: u64 = 0;
         while (index < @as(u64, 1) << num_positions) : (index += 1) {
             const blocked: u64 = populate_occupancy_map(index, relevant_positions, num_positions);
-            const hash = (blocked *% magics.ROOK_MAGIC_NUMBERS[square]) >> (~num_positions + 1);
-            rook_attack_table[square][hash] = generate_rook_attacks(square, blocked);
+            const hash = (blocked *% magics.ROOK_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
+            rook_attack_table[square_index][hash] = generate_rook_attacks(square, blocked);
         }
     }
 }
 
-pub fn bishop_attacks(square: u6, blocked: u64) u64 {
+pub fn bishop_attacks(square: Square, blocked: u64) u64 {
     // mask off the pieces we don't care about
-    const relevant_blocks = blocked & bishop_blocking_positions[square];
-    const hash = (relevant_blocks *% magics.BISHOP_MAGIC_NUMBERS[square]) >> (~BISHOP_RELEVANT_BITS[square] + 1);
-    return bishop_attack_table[square][hash];
+    const relevant_blocks = blocked & bishop_blocking_positions[@enumToInt(square)];
+    const hash = (relevant_blocks *% magics.BISHOP_MAGIC_NUMBERS[@enumToInt(square)]) >> (~BISHOP_RELEVANT_BITS[@enumToInt(square)] + 1);
+    return bishop_attack_table[@enumToInt(square)][hash];
 }
 
-pub fn rook_attacks(square: u6, blocked: u64) u64 {
+pub fn rook_attacks(square: Square, blocked: u64) u64 {
     // mask off the pieces we don't care about
-    const relevant_blocks = blocked & rook_blocking_positions[square];
-    const hash = (relevant_blocks *% magics.ROOK_MAGIC_NUMBERS[square]) >> (~ROOK_RELEVANT_BITS[square] + 1);
-    return rook_attack_table[square][hash];
-}
-
-pub fn queen_attacks(square: u6, blocked: u64) u64 {
-    return bishop_attacks(square, blocked) | rook_attacks(square, blocked);
+    const relevant_blocks = blocked & rook_blocking_positions[@enumToInt(square)];
+    const hash = (relevant_blocks *% magics.ROOK_MAGIC_NUMBERS[@enumToInt(square)]) >> (~ROOK_RELEVANT_BITS[@enumToInt(square)] + 1);
+    return rook_attack_table[@enumToInt(square)][hash];
 }
 
 /// A lookup table containing the paths between any two squares on the board.
 /// Source square is included, target square is not.
 /// The table should be indexed like this: `PATH_BETWEEN_SQUARES[source][target]`.
-pub var PATH_BETWEEN_SQUARES: [64][64]u64 = undefined;
+/// Results is undefined if source == target
+var PATH_BETWEEN_SQUARES: [64][64]u64 = undefined;
 
 pub fn init_paths_between_squares() void {
-    var source: u6 = 0;
-    while (true) : (source += 1) {
-        var target: u6 = 0;
-        while (true) : (target += 1) {
-            if (source == target) PATH_BETWEEN_SQUARES[source][target] = 0;
+    var source_index: u6 = 0;
+    while (true) : (source_index += 1) {
+        var target_index: u6 = 0;
+        while (true) : (target_index += 1) {
+            const source = @intToEnum(Square, source_index);
+            const target = @intToEnum(Square, target_index);
 
-            const blocked = @as(u64, 1) << source | @as(u64, 1) << target;
+            const blocked = @as(u64, 1) << source_index | @as(u64, 1) << target_index;
             // if horizontally aligned
-            if (rank(source) == rank(target) or file(source) == file(target)) {
-                PATH_BETWEEN_SQUARES[source][target] = rook_attacks(source, blocked) & rook_attacks(target, blocked);
-                PATH_BETWEEN_SQUARES[source][target] ^= @as(u64, 1) << source;
+            if (source.rank() == target.rank() or source.file() == target.file()) {
+                PATH_BETWEEN_SQUARES[source_index][target_index] = rook_attacks(source, blocked) & rook_attacks(target, blocked);
+                PATH_BETWEEN_SQUARES[source_index][target_index] ^= @as(u64, 1) << source_index;
             }
             // if diagonally aligned (if the absolute difference between their ranks is the same as their files
-            else if (@maximum(rank(source), rank(target)) - @minimum(rank(source), rank(target)) ==
-                @maximum(file(source), file(target)) - @minimum(file(source), file(target)))
+            else if (@maximum(source.rank(), target.rank()) - @minimum(source.rank(), target.rank()) ==
+                @maximum(source.file(), target.file()) - @minimum(source.file(), target.file()))
             {
-                PATH_BETWEEN_SQUARES[source][target] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
-                PATH_BETWEEN_SQUARES[source][target] ^= @as(u64, 1) << source;
+                PATH_BETWEEN_SQUARES[source_index][target_index] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
+                PATH_BETWEEN_SQUARES[source_index][target_index] ^= @as(u64, 1) << source_index;
             } else {
                 // no straight path => 0
-                PATH_BETWEEN_SQUARES[source][target] = 0;
+                PATH_BETWEEN_SQUARES[source_index][target_index] = 0;
             }
-            if (target == 63) break;
+            if (target_index == 63) break;
         }
 
-        if (source == 63) break;
+        if (source_index == 63) break;
     }
 }
 
-pub inline fn file(square: u6) u3 {
-    return @intCast(u3, square & 0b111);
+pub inline fn path_between_squares(from: Square, to: Square) u64 {
+    return PATH_BETWEEN_SQUARES[@enumToInt(from)][@enumToInt(to)];
 }
 
-pub inline fn rank(square: u6) u3 {
-    return @intCast(u3, square >> 3);
-}
