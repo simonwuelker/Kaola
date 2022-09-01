@@ -1,5 +1,6 @@
 //! (For now) a very primitive search
 const Board = @import("board.zig").Board;
+const Color = @import("board.zig").Color;
 const movegen = @import("movegen.zig");
 const pesto = @import("pesto.zig");
 const Move = movegen.Move;
@@ -32,7 +33,11 @@ fn max_score(board: Board, depth: u8) i16 {
 
 pub fn search(board: Board, depth: u8) Move {
     num_moves = 0;
-    movegen.generate_moves(board, callback);
+    if (board.active_color == Color.white) {
+        movegen.generate_moves(Color.white, board, callback);
+    } else {
+        movegen.generate_moves(Color.black, board, callback);
+    }
     _ = depth;
     return moves[0];
     // var best_move: Move = undefined;

@@ -3,11 +3,15 @@
 
 const std = @import("std");
 const bitops = @import("bitops.zig");
-const Square = @import("board.zig").Square;
+const board_module = @import("board.zig");
+const Square = board_module.Square;
+const Color = board_module.Color;
 const rand = @import("rand.zig");
 const magics = @import("magics.zig");
 
-pub fn print_bitboard(board: u64, title: []const u8) void {
+pub const Bitboard = u64;
+
+pub fn print_bitboard(board: Bitboard, title: []const u8) void {
     std.debug.print("\n==> {s}\n", .{title});
     var i: u6 = 0;
     while (i < 8) : (i += 1) {
@@ -52,21 +56,21 @@ const ROOK_RELEVANT_BITS = [64]u6{
 };
 
 /// Bit mask for masking off the A file
-const NOT_A_FILE: u64 = 0xfefefefefefefefe;
+const NOT_A_FILE: Bitboard = 0xfefefefefefefefe;
 /// Bit mask for masking off the H file
-const NOT_H_FILE: u64 = 0x7f7f7f7f7f7f7f7f;
+const NOT_H_FILE: Bitboard = 0x7f7f7f7f7f7f7f7f;
 /// Bit mask for masking off the A and B files
-const NOT_AB_FILE: u64 = 0xfcfcfcfcfcfcfcfc;
+const NOT_AB_FILE: Bitboard = 0xfcfcfcfcfcfcfcfc;
 /// Bit mask for masking off the G and H files
-const NOT_GH_FILE: u64 = 0x3f3f3f3f3f3f3f3f;
+const NOT_GH_FILE: Bitboard = 0x3f3f3f3f3f3f3f3f;
 /// Bit mask for masking the A file
-const A_FILE: u64 = 0x101010101010101;
+const A_FILE: Bitboard = 0x101010101010101;
 /// Bit mask for masking the first rank
-const EIGTH_RANK: u64 = 0xff;
+const EIGTH_RANK: Bitboard = 0xff;
 /// Bit mask for masking off the outer files
-const NOT_AH_FILE: u64 = 0x7e7e7e7e7e7e7e7e;
+const NOT_AH_FILE: Bitboard = 0x7e7e7e7e7e7e7e7e;
 /// Bit mask for masking off the outer ranks
-const NOT_FIRST_OR_EIGTH_RANK: u64 = 0xffffffffffff00;
+const NOT_FIRST_OR_EIGTH_RANK: Bitboard = 0xffffffffffff00;
 
 fn bitboard_distance_to_edge(square: Square, shift: i5) u3 {
     return switch (shift) {
@@ -84,12 +88,12 @@ fn bitboard_distance_to_edge(square: Square, shift: i5) u3 {
 
 /// Get the index of the least significant bit in a bitboard.
 /// Causes undefined behaviour if the bitboard has no bit set.
-pub inline fn get_lsb_square(board: u64) Square {
+pub inline fn get_lsb_square(board: Bitboard) Square {
     std.debug.assert(board != 0);
-    return @intToEnum(Square, @ctz(u64, board));
+    return @intToEnum(Square, @ctz(Bitboard, board));
 }
 
-fn attacks_in_direction(start: Square, signed_shift: i5, blocked: u64) u64 {
+fn attacks_in_direction(start: Square, signed_shift: i5, blocked: Bitboard) Bitboard {
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
     const negative_shift = if (signed_shift < 0) true else false;
     const shift: u5 = std.math.absCast(signed_shift);
@@ -103,7 +107,7 @@ fn attacks_in_direction(start: Square, signed_shift: i5, blocked: u64) u64 {
     return attack_mask;
 }
 
-fn mask_in_direction(start: Square, signed_shift: i5) u64 {
+fn mask_in_direction(start: Square, signed_shift: i5) Bitboard {
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
     if (max_moves == 0) return 0;
     const negative_shift = if (signed_shift < 0) true else false;
@@ -118,39 +122,31 @@ fn mask_in_direction(start: Square, signed_shift: i5) u64 {
     return mask;
 }
 
-/// Compute the left attacks for a set of white pawns
+/// Compute the left attacks for a set of pawns
 /// (Left from white's POV)
-pub inline fn white_pawn_attacks_left(board: u64) u64 {
-    return (board & NOT_A_FILE) >> 9;
+pub inline fn pawn_attacks_left(comptime color: Color, board: Bitboard) Bitboard {
+    if (color == Color.white) {
+        return (board & NOT_A_FILE) >> 9;
+    } else {
+        return (board & NOT_A_FILE) << 7;
+    }
 }
 
-/// Compute the right attacks for a set of white pawns
+/// Compute the right attacks for a set of pawns
 /// (Left from white's POV)
-pub inline fn white_pawn_attacks_right(board: u64) u64 {
-    return (board & NOT_H_FILE) >> 7;
+pub inline fn pawn_attacks_right(comptime color: Color, board: Bitboard) Bitboard {
+    if (color == Color.white) {
+        return (board & NOT_H_FILE) >> 7;
+    } else {
+        return (board & NOT_H_FILE) << 9;
+    }
 }
 
-/// Compute the left attacks for a set of black pawns
-/// (Left from white's POV)
-pub inline fn black_pawn_attacks_left(board: u64) u64 {
-    return (board & NOT_A_FILE) << 7;
+pub inline fn pawn_attacks(comptime color: Color, board: Bitboard) Bitboard {
+    return pawn_attacks_left(color, board) | pawn_attacks_right(color, board);
 }
 
-/// Compute the right attacks for a set of black pawns
-/// (Left from white's POV)
-pub inline fn black_pawn_attacks_right(board: u64) u64 {
-    return (board & NOT_H_FILE) << 9;
-}
-
-pub inline fn white_pawn_attacks(board: u64) u64 {
-    return white_pawn_attacks_left(board) | white_pawn_attacks_right(board);
-}
-
-pub inline fn black_pawn_attacks(board: u64) u64 {
-    return black_pawn_attacks_left(board) | black_pawn_attacks_right(board);
-}
-
-pub fn king_attacks(board: u64) u64 {
+pub fn king_attacks(board: Bitboard) Bitboard {
     return ((board & NOT_A_FILE) >> 1) // left
     | ((board & NOT_H_FILE) << 1) // right
     | (board << 8) // down
@@ -161,13 +157,12 @@ pub fn king_attacks(board: u64) u64 {
     | ((board & NOT_A_FILE) << 7); // down left
 }
 
-pub fn knight_attack(field: Square) u64 {
-    const board: u64 = @as(u64, 1) << @enumToInt(field);
-    return knight_attacks(board);
+pub fn knight_attack(square: Square) Bitboard {
+    return knight_attacks(square.as_board());
 }
 
 /// Take a bitboard of knights and produce a bitboard marking their attacks
-pub fn knight_attacks(board: u64) u64 {
+pub fn knight_attacks(board: Bitboard) Bitboard {
     return ((board & NOT_A_FILE) >> 17) // up up left
     | ((board & NOT_H_FILE) >> 15) // up up right
     | ((board & NOT_GH_FILE) >> 6) // up right right
@@ -179,7 +174,7 @@ pub fn knight_attacks(board: u64) u64 {
 }
 
 /// Determine the positions whose occupancy is relevant to the moves a bishop can make
-fn bishop_relevant_positions(square: Square) u64 {
+fn bishop_relevant_positions(square: Square) Bitboard {
     var board: u64 = 0;
     board |= mask_in_direction(square, 7);
     board |= mask_in_direction(square, -7);
@@ -189,15 +184,15 @@ fn bishop_relevant_positions(square: Square) u64 {
 }
 
 /// Determine the positions whose occupancy is relevant to the moves a rook can make
-fn rook_relevant_positions(square: Square) u64 {
-    var board: u64 = 0;
+fn rook_relevant_positions(square: Square) Bitboard {
+    var board: Bitboard = 0;
     board |= (A_FILE << square.file()) & NOT_FIRST_OR_EIGTH_RANK;
     board |= (EIGTH_RANK << (square.rank())) & NOT_AH_FILE;
     board ^= square.as_board(); // the rooks position itself is not relevant
     return board;
 }
 
-fn generate_bishop_attacks(square: Square, blocked: u64) u64 {
+fn generate_bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
     var board: u64 = 0;
     board |= attacks_in_direction(square, 7, blocked);
     board |= attacks_in_direction(square, -7, blocked);
@@ -206,7 +201,7 @@ fn generate_bishop_attacks(square: Square, blocked: u64) u64 {
     return board;
 }
 
-fn generate_rook_attacks(square: Square, blocked: u64) u64 {
+fn generate_rook_attacks(square: Square, blocked: Bitboard) Bitboard {
     var board: u64 = 0;
     board |= attacks_in_direction(square, 8, blocked);
     board |= attacks_in_direction(square, -8, blocked);
@@ -215,28 +210,28 @@ fn generate_rook_attacks(square: Square, blocked: u64) u64 {
     return board;
 }
 
-fn populate_occupancy_map(index_: u64, attack_map_: u64, num_bits: u6) u64 {
+fn populate_occupancy_map(index_: Bitboard, attack_map_: Bitboard, num_bits: u6) Bitboard {
     var index = index_;
-    var attack_map: u64 = attack_map_;
-    var occupied: u64 = 0;
+    var attack_map: Bitboard = attack_map_;
+    var occupied: Bitboard = 0;
     var count: u6 = 0;
     while (count < num_bits) : (count += 1) {
         // continously pop the ls1b
         // truncate is safe here because there because we will never reach attack_map = 0
-        var square: u6 = @truncate(u6, @ctz(u64, attack_map));
-        attack_map ^= @as(u64, 1) << square;
+        const square = get_lsb_square(attack_map);
+        attack_map ^= square.as_board();
 
         if (index & 1 != 0) {
-            occupied |= @as(u64, 1) << square;
+            occupied |= square.as_board();
         }
         index >>= 1;
     }
     return occupied;
 }
 
-fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
-    var attacks: [4096]u64 = undefined;
-    var occupancies: [4096]u64 = undefined;
+fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) Bitboard {
+    var attacks: [4096]Bitboard = undefined;
+    var occupancies: [4096]Bitboard = undefined;
     const occupancy_mask = if (bishop) bishop_relevant_positions(square) else rook_relevant_positions(square);
     const num_blocking_combinations: u64 = @as(u64, 1) << num_relevant_positions;
 
@@ -280,10 +275,10 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) u64 {
     }
 }
 
-var bishop_attack_table: [64][512]u64 = undefined;
-var bishop_blocking_positions: [64]u64 = undefined;
-var rook_attack_table: [64][4096]u64 = undefined;
-var rook_blocking_positions: [64]u64 = undefined;
+var bishop_attack_table: [64][512]Bitboard = undefined;
+var bishop_blocking_positions: [64]Bitboard = undefined;
+var rook_attack_table: [64][4096]Bitboard = undefined;
+var rook_blocking_positions: [64]Bitboard = undefined;
 
 fn init_magic_numbers() void {
     var square: u6 = 0;
@@ -305,7 +300,7 @@ pub fn init_slider_attacks() void {
         const num_positions: u6 = BISHOP_RELEVANT_BITS[square_index];
         var index: u64 = 0;
         while (index < @as(u64, 1) << num_positions) : (index += 1) {
-            const blocked: u64 = populate_occupancy_map(index, relevant_positions, num_positions);
+            const blocked: Bitboard = populate_occupancy_map(index, relevant_positions, num_positions);
             const hash = (blocked *% magics.BISHOP_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
             bishop_attack_table[square_index][hash] = generate_bishop_attacks(square, blocked);
         }
@@ -318,21 +313,21 @@ pub fn init_slider_attacks() void {
         const num_positions: u6 = ROOK_RELEVANT_BITS[square_index];
         var index: u64 = 0;
         while (index < @as(u64, 1) << num_positions) : (index += 1) {
-            const blocked: u64 = populate_occupancy_map(index, relevant_positions, num_positions);
+            const blocked: Bitboard = populate_occupancy_map(index, relevant_positions, num_positions);
             const hash = (blocked *% magics.ROOK_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
             rook_attack_table[square_index][hash] = generate_rook_attacks(square, blocked);
         }
     }
 }
 
-pub fn bishop_attacks(square: Square, blocked: u64) u64 {
+pub fn bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
     // mask off the pieces we don't care about
     const relevant_blocks = blocked & bishop_blocking_positions[@enumToInt(square)];
     const hash = (relevant_blocks *% magics.BISHOP_MAGIC_NUMBERS[@enumToInt(square)]) >> (~BISHOP_RELEVANT_BITS[@enumToInt(square)] + 1);
     return bishop_attack_table[@enumToInt(square)][hash];
 }
 
-pub fn rook_attacks(square: Square, blocked: u64) u64 {
+pub fn rook_attacks(square: Square, blocked: Bitboard) Bitboard {
     // mask off the pieces we don't care about
     const relevant_blocks = blocked & rook_blocking_positions[@enumToInt(square)];
     const hash = (relevant_blocks *% magics.ROOK_MAGIC_NUMBERS[@enumToInt(square)]) >> (~ROOK_RELEVANT_BITS[@enumToInt(square)] + 1);
@@ -343,7 +338,7 @@ pub fn rook_attacks(square: Square, blocked: u64) u64 {
 /// Source square is included, target square is not.
 /// The table should be indexed like this: `PATH_BETWEEN_SQUARES[source][target]`.
 /// Results is undefined if source == target
-var PATH_BETWEEN_SQUARES: [64][64]u64 = undefined;
+var PATH_BETWEEN_SQUARES: [64][64]Bitboard = undefined;
 
 pub fn init_paths_between_squares() void {
     var source_index: u6 = 0;
@@ -353,18 +348,18 @@ pub fn init_paths_between_squares() void {
             const source = @intToEnum(Square, source_index);
             const target = @intToEnum(Square, target_index);
 
-            const blocked = @as(u64, 1) << source_index | @as(u64, 1) << target_index;
+            const blocked = source.as_board() | target.as_board();
             // if horizontally aligned
             if (source.rank() == target.rank() or source.file() == target.file()) {
                 PATH_BETWEEN_SQUARES[source_index][target_index] = rook_attacks(source, blocked) & rook_attacks(target, blocked);
-                PATH_BETWEEN_SQUARES[source_index][target_index] ^= @as(u64, 1) << source_index;
+                PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
             }
             // if diagonally aligned (if the absolute difference between their ranks is the same as their files
             else if (@maximum(source.rank(), target.rank()) - @minimum(source.rank(), target.rank()) ==
                 @maximum(source.file(), target.file()) - @minimum(source.file(), target.file()))
             {
                 PATH_BETWEEN_SQUARES[source_index][target_index] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
-                PATH_BETWEEN_SQUARES[source_index][target_index] ^= @as(u64, 1) << source_index;
+                PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
             } else {
                 // no straight path => 0
                 PATH_BETWEEN_SQUARES[source_index][target_index] = 0;
@@ -376,7 +371,7 @@ pub fn init_paths_between_squares() void {
     }
 }
 
-pub inline fn path_between_squares(from: Square, to: Square) u64 {
+pub inline fn path_between_squares(from: Square, to: Square) Bitboard {
     return PATH_BETWEEN_SQUARES[@enumToInt(from)][@enumToInt(to)];
 }
 

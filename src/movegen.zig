@@ -7,6 +7,7 @@ const Color = board.Color;
 const Square = board.Square;
 const PieceType = board.PieceType;
 const bitboard = @import("bitboard.zig");
+const Bitboard = bitboard.Bitboard;
 
 /// Bit mask for masking off the third rank
 const THIRD_RANK: u64 = 0x0000FF0000000000;
@@ -92,93 +93,98 @@ pub const Move = struct {
 
     /// Move is assumed to be more or less correct, only limited safety checks are performed
     pub fn from_str(str: []const u8, game: board.Board) MoveParseError!Move {
-        if (str.len != 4 and str.len != 5) return MoveParseError.InvalidLength;
+        _ = str;
+        _ = game;
+        unreachable;
+        // if (str.len != 4 and str.len != 5) return MoveParseError.InvalidLength;
 
-        const from = Square.from_str(str[0..2]);
-        const to = Square.from_str(str[2..4]);
-        const moving_piece = game.pieces(@enumToInt(from)) orelse return MoveParseError.NoPieceFound;
+        // const from = Square.from_str(str[0..2]);
+        // const to = Square.from_str(str[2..4]);
+        // const moving_piece = game.pieces[@enumToInt(from)] orelse return MoveParseError.NoPieceFound;
 
-        // Correctly parsing moves is a long and painful process, so to keep it somewhat organized
-        // we *first* determine the properties of a move and *then* set to move type.
-        var is_capture = false;
-        var is_promotion = false;
-        var is_en_passant = false;
-        var is_castle_short = false;
-        var is_castle_long = false;
-        var is_double_push = false;
+        // // Correctly parsing moves is a long and painful process, so to keep it somewhat organized
+        // // we *first* determine the properties of a move and *then* set to move type.
+        // var is_capture = false;
+        // var is_promotion = false;
+        // var is_en_passant = false;
+        // var is_castle_short = false;
+        // var is_castle_long = false;
+        // var is_double_push = false;
+        // var promote_to: ?PieceType = null;
 
-        var promote_to: ?PieceType = null;
-        if (str.len == 5) {
-            promote_to = switch (str[4]) {
-                'q' => PieceType.queen,
-                'r' => PieceType.rook,
-                'b' => PieceType.bishop,
-                'n' => PieceType.knight,
-                else => return MoveParseError.InvalidPromotion,
-            };
-        }
-        if (game.active_color == Color.white and game.castling_rights.white_queenside and from == Square.e1 and to == Square.c1 or
-            game.active_color == Color.black and game.castling_rights.black_queenside and from == Square.e8 and to == Square.c8)
-        {
-            is_castle_long = true;
-        } else if (game.active_color == Color.white and game.castling_rights.white_kingside and from == Square.e1 and to == Square.g1 or
-            game.active_color == Color.black and game.castling_rights.black_kingside and from == Square.e8 and to == Square.g8)
-        {
-            is_castle_short = true;
-        }
-        // any pawn moves that covers two ranks must be a double push
-        const from_rank = bitboard.rank(@enumToInt(from));
-        const to_rank = bitboard.rank(@enumToInt(to));
-        if (moving_piece.piece_type == PieceType.pawn and @maximum(from_rank, to_rank) - @minimum(from_rank, to_rank) == 2) {
-            is_en_passant = true;
-        }
-        if (game.pieces(@enumToInt(to))) |_| {
-            is_capture = true;
-        }
-        // Assume that any pawn capture with an empty target is an en passant
-        if (moving_piece.piece_type == PieceType.pawn and bitboard.file(@enumToInt(from)) != bitboard.file(@enumToInt(to)) and !is_capture) {
-            is_en_passant = true;
-        }
-        if (game.active_color == Color.white and moving_piece.piece_type == PieceType.pawn and bitboard.rank(@enumToInt(to)) == 7 or
-            game.active_color == Color.black and moving_piece.piece_type == PieceType.pawn and bitboard.rank(@enumToInt(to)) == 0)
-        {
-            is_promotion = true;
-        }
+        // if (str.len == 5) {
+        //     promote_to = switch (str[4]) {
+        //         'q' => PieceType.queen,
+        //         'r' => PieceType.rook,
+        //         'b' => PieceType.bishop,
+        //         'n' => PieceType.knight,
+        //         else => return MoveParseError.InvalidPromotion,
+        //     };
+        // }
+        // if (game.active_color == Color.white and game.castling_rights.white_queenside and from == Square.E1 and to == Square.C1 or
+        //     game.active_color == Color.black and game.castling_rights.black_queenside and from == Square.E8 and to == Square.C8)
+        // {
+        //     is_castle_long = true;
+        // } else if (game.active_color == Color.white and game.castling_rights.white_kingside and from == Square.E1 and to == Square.G1 or
+        //     game.active_color == Color.black and game.castling_rights.black_kingside and from == Square.E8 and to == Square.G8)
+        // {
+        //     is_castle_short = true;
+        // }
+        // // any pawn moves that covers two ranks must be a double push
+        // const from_rank = from.rank();
+        // const to_rank = to.rank();
+        // if (moving_piece.piece_type() == PieceType.pawn and @maximum(from_rank, to_rank) - @minimum(from_rank, to_rank) == 2) {
+        //     is_double_push = true;
+        // }
+        // // if the target square is occupied, thats a capture
+        // if (game.pieces[@enumToInt(to)]) |_| {
+        //     is_capture = true;
+        // }
+        // // Assume that any pawn capture with an empty target is an en passant
+        // if (moving_piece.piece_type() == PieceType.pawn and from.file() != to.file() and !is_capture) {
+        //     is_en_passant = true;
+        // }
 
-        var move_type = MoveType.QUIET;
-        if (is_castle_long) {
-            move_type = MoveType.CASTLE_LONG;
-        } else if (is_castle_short) {
-            move_type = MoveType.CASTLE_SHORT;
-        } else if (is_en_passant) {
-            move_type = MoveType.EN_PASSANT;
-        } else if (is_double_push) {
-            move_type = MoveType.DOUBLE_PUSH;
-        } else if (is_capture and is_promotion and promote_to == PieceType.queen) {
-            move_type = MoveType.CAPTURE_PROMOTE_QUEEN;
-        } else if (is_capture and is_promotion and promote_to == PieceType.rook) {
-            move_type = MoveType.CAPTURE_PROMOTE_ROOK;
-        } else if (is_capture and is_promotion and promote_to == PieceType.bishop) {
-            move_type = MoveType.CAPTURE_PROMOTE_BISHOP;
-        } else if (is_capture and is_promotion and promote_to == PieceType.knight) {
-            move_type = MoveType.CAPTURE_PROMOTE_KNIGHT;
-        } else if (is_promotion and promote_to == PieceType.queen) {
-            move_type = MoveType.PROMOTE_QUEEN;
-        } else if (is_promotion and promote_to == PieceType.rook) {
-            move_type = MoveType.PROMOTE_ROOK;
-        } else if (is_promotion and promote_to == PieceType.bishop) {
-            move_type = MoveType.PROMOTE_BISHOP;
-        } else if (is_promotion and promote_to == PieceType.knight) {
-            move_type = MoveType.PROMOTE_KNIGHT;
-        } else if (is_capture) {
-            move_type = MoveType.CAPTURE;
-        }
+        // if (game.active_color == Color.white and moving_piece.piece_type() == PieceType.pawn and to.rank() == 7 or
+        //     game.active_color == Color.black and moving_piece.piece_type() == PieceType.pawn and to.rank() == 0)
+        // {
+        //     is_promotion = true;
+        // }
 
-        return Move{
-            .from = from,
-            .to = to,
-            .move_type = move_type,
-        };
+        // var move_type = MoveType.QUIET;
+        // if (is_castle_long) {
+        //     move_type = MoveType.CASTLE_LONG;
+        // } else if (is_castle_short) {
+        //     move_type = MoveType.CASTLE_SHORT;
+        // } else if (is_en_passant) {
+        //     move_type = MoveType.EN_PASSANT;
+        // } else if (is_double_push) {
+        //     move_type = MoveType.DOUBLE_PUSH;
+        // } else if (is_capture and is_promotion and promote_to == PieceType.queen) {
+        //     move_type = MoveType.CAPTURE_PROMOTE_QUEEN;
+        // } else if (is_capture and is_promotion and promote_to == PieceType.rook) {
+        //     move_type = MoveType.CAPTURE_PROMOTE_ROOK;
+        // } else if (is_capture and is_promotion and promote_to == PieceType.bishop) {
+        //     move_type = MoveType.CAPTURE_PROMOTE_BISHOP;
+        // } else if (is_capture and is_promotion and promote_to == PieceType.knight) {
+        //     move_type = MoveType.CAPTURE_PROMOTE_KNIGHT;
+        // } else if (is_promotion and promote_to == PieceType.queen) {
+        //     move_type = MoveType.PROMOTE_QUEEN;
+        // } else if (is_promotion and promote_to == PieceType.rook) {
+        //     move_type = MoveType.PROMOTE_ROOK;
+        // } else if (is_promotion and promote_to == PieceType.bishop) {
+        //     move_type = MoveType.PROMOTE_BISHOP;
+        // } else if (is_promotion and promote_to == PieceType.knight) {
+        //     move_type = MoveType.PROMOTE_KNIGHT;
+        // } else if (is_capture) {
+        //     move_type = MoveType.CAPTURE;
+        // }
+
+        // // return Move{
+        // //     .from = from,
+        // //     .to = to,
+        // //     .move_type = move_type,
+        // // };
     }
 };
 
@@ -234,8 +240,7 @@ pub fn generate_pinmask(game: board.Board) Pinmask {
 /// * No bits set if two pieces are attacking the king
 /// That way, legal non-king moves can be masked. (Because they either have to block the check or 
 /// capture the attacking piece)
-pub fn generate_checkmask(game: board.Board) u64 {
-    const us = game.active_color;
+pub fn generate_checkmask(comptime us: Color, game: board.Board) u64 {
     const them = us.other();
     const opponent_diag_sliders = game.get_bitboard(PieceType.bishop.color(them)) | game.get_bitboard(PieceType.queen.color(them));
     const opponent_straight_sliders = game.get_bitboard(PieceType.rook.color(them)) | game.get_bitboard(PieceType.queen.color(them));
@@ -263,16 +268,13 @@ pub fn generate_checkmask(game: board.Board) u64 {
     const attacking_knight = bitboard.knight_attack(king_square) & game.get_bitboard(PieceType.knight.color(them));
     if (attacking_knight != 0) {
         const knight_square = bitboard.get_lsb_square(attacking_knight);
-        checkmask |= @as(u64, 1) << @enumToInt(knight_square);
+        checkmask |= knight_square.as_board();
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
 
-    const attacking_pawns = switch (us) {
-        Color.white => bitboard.white_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(them)),
-        Color.black => bitboard.black_pawn_attacks(game.get_bitboard(PieceType.king.color(us))) & game.get_bitboard(PieceType.pawn.color(them)),
-        else => unreachable,
-    };
+    const attacking_pawns = bitboard.pawn_attacks(us, game.get_bitboard(PieceType.king.color(us)));
+
     if (attacking_pawns != 0) {
         const pawn_square = bitboard.get_lsb_square(attacking_pawns);
         checkmask |= pawn_square.as_board();
@@ -284,16 +286,15 @@ pub fn generate_checkmask(game: board.Board) u64 {
     return ~@as(u64, 0);
 }
 
-pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
-    const us = game.active_color;
+pub fn generate_moves(comptime us: Color, game: board.Board, emit: MoveCallback) void {
     const them = us.other();
-    const king_unsafe_squares = game.king_unsafe_squares();
+    const king_unsafe_squares = game.king_unsafe_squares(us);
     const diag_sliders = game.get_bitboard(PieceType.bishop.color(us)) | game.get_bitboard(PieceType.queen.color(us));
     const straight_sliders = game.get_bitboard(PieceType.rook.color(us)) | game.get_bitboard(PieceType.queen.color(us));
     const enemy_or_empty = ~game.get_occupancies(us);
     const enemy = game.get_occupancies(them);
     const empty = ~game.get_occupancies(Color.both);
-    const checkmask = generate_checkmask(game);
+    const checkmask = generate_checkmask(us, game);
     const pinmask = generate_pinmask(game);
 
     // legal king moves
@@ -355,67 +356,62 @@ pub fn generate_moves(game: board.Board, emit: MoveCallback) void {
     // (performance gud, we do constexpr by hand ^^)
     switch (us) {
         Color.white => {
-            white_pawn_moves(game, emit, checkmask, pinmask);
-            white_castle(game, emit, king_unsafe_squares);
+            pawn_moves(Color.white, game, emit, checkmask, pinmask);
+            castle(Color.white, game, emit, king_unsafe_squares);
         },
         Color.black => {
-            black_castle(game, emit, king_unsafe_squares);
+            castle(Color.black, game, emit, king_unsafe_squares);
         },
         else => unreachable,
     }
 }
 
-fn white_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
-    const king = game.get_bitboard(Piece.white_king);
-    if (king & king_unsafe_squares != 0) return; // cannot castle either way when in check
+fn castle(comptime color: Color, game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
+    // cannot castle either way when in check
+    if (color == Color.white) {
+        if (game.get_bitboard(Piece.white_king) & king_unsafe_squares != 0) return;
+    } else {
+        if (game.get_bitboard(Piece.black_king) & king_unsafe_squares != 0) return;
+    }
 
     // The squares we traverse must not be in check or occupied
     const travel_blockers = (game.get_occupancies(Color.both) | king_unsafe_squares);
     const queenside_blockers = travel_blockers & WHITE_QUEENSIDE;
     const kingside_blockers = travel_blockers & WHITE_KINGSIDE;
-    if (game.castling_rights.white_queenside and queenside_blockers == 0) {
-        emit(Move{
-            .from = Square.A8,
-            .to = Square.A8,
-            .move_type = MoveType.CASTLE_LONG,
-        });
+    if (game.castling_rights.queenside(color) and queenside_blockers == 0) {
+        if (color == Color.white) {
+            emit(Move{
+                .from = Square.E1,
+                .to = Square.C1,
+                .move_type = MoveType.CASTLE_LONG,
+            });
+        } else {
+            emit(Move{
+                .from = Square.E8,
+                .to = Square.C8,
+                .move_type = MoveType.CASTLE_LONG,
+            });
+        }
     }
 
-    if (game.castling_rights.white_kingside and kingside_blockers == 0) {
-        emit(Move{
-            .from = Square.A8,
-            .to = Square.A8,
-            .move_type = MoveType.CASTLE_SHORT,
-        });
-    }
-}
-
-fn black_castle(game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
-    const king = game.get_bitboard(Piece.black_king);
-    if (king & king_unsafe_squares != 0) return; // cannot castle either way when in check
-
-    // The squares we traverse must not be in check or occupied
-    const travel_blockers = (game.get_occupancies(Color.both) | king_unsafe_squares);
-    const queenside_blockers = travel_blockers & BLACK_QUEENSIDE;
-    const kingside_blockers = travel_blockers & BLACK_KINGSIDE;
-    if (game.castling_rights.black_queenside and queenside_blockers == 0) {
-        emit(Move{
-            .from = Square.A8,
-            .to = Square.A8,
-            .move_type = MoveType.CASTLE_LONG,
-        });
-    }
-
-    if (game.castling_rights.black_kingside and kingside_blockers == 0) {
-        emit(Move{
-            .from = Square.A8,
-            .to = Square.A8,
-            .move_type = MoveType.CASTLE_SHORT,
-        });
+    if (game.castling_rights.kingside(color) and kingside_blockers == 0) {
+        if (color == Color.white) {
+            emit(Move{
+                .from = Square.E1,
+                .to = Square.G1,
+                .move_type = MoveType.CASTLE_SHORT,
+            });
+        } else {
+            emit(Move{
+                .from = Square.E8,
+                .to = Square.G8,
+                .move_type = MoveType.CASTLE_SHORT,
+            });
+        }
     }
 }
 
-fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinmask: Pinmask) void {
+fn pawn_moves(comptime color: Color, game: board.Board, emit: MoveCallback, checkmask: u64, pinmask: Pinmask) void {
     // Terminology:
     // moving => move pawn one square
     // pushing => move pawn two squares
@@ -424,7 +420,7 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     const white_pawns = game.get_bitboard(Piece.white_pawn);
 
     // pawn moves
-    var legal_pawn_moves: u64 = 0;
+    var legal_pawn_moves: Bitboard = 0;
     const straight_pinned_pawns = white_pawns & pinmask.straight;
     const pinned_pawn_moves = straight_pinned_pawns >> 8 & pinmask.straight & empty; // needed later for pawn pushes
     legal_pawn_moves |= pinned_pawn_moves;
@@ -456,15 +452,15 @@ fn white_pawn_moves(game: board.Board, emit: MoveCallback, checkmask: u64, pinma
     }
 
     // pawn captures
-    var left_captures: u64 = 0;
-    var right_captures: u64 = 0;
+    var left_captures: Bitboard = 0;
+    var right_captures: Bitboard = 0;
 
     const diag_pinned_pawns = white_pawns & pinmask.diagonal;
-    left_captures |= bitboard.white_pawn_attacks_left(diag_pinned_pawns) & pinmask.diagonal;
-    left_captures |= bitboard.white_pawn_attacks_left(unpinned_pawns);
+    left_captures |= bitboard.pawn_attacks_left(color, diag_pinned_pawns) & pinmask.diagonal;
+    left_captures |= bitboard.pawn_attacks_left(color, unpinned_pawns);
 
-    right_captures |= bitboard.white_pawn_attacks_right(diag_pinned_pawns) & pinmask.diagonal;
-    right_captures |= bitboard.white_pawn_attacks_right(unpinned_pawns);
+    right_captures |= bitboard.pawn_attacks_right(color, diag_pinned_pawns) & pinmask.diagonal;
+    right_captures |= bitboard.pawn_attacks_right(color, unpinned_pawns);
 
     left_captures &= game.get_occupancies(Color.black);
     right_captures &= game.get_occupancies(Color.black);
@@ -518,3 +514,35 @@ test "checkmask generation" {
     const no_check = try board.Board.from_fen("8/8/8/3K4/8/8/8/8 w - - 0 0");
     try expectEqual(~@as(u64, 0), generate_checkmask(no_check));
 }
+
+// test "Move to string" {
+//     const expectEqual = std.testing.expectEqual;
+//
+//     const regular = Move{
+//         .from = Square.C2,
+//         .to = Square.C5,
+//         .move_type = MoveType.CASTLE_SHORT,
+//     };
+//     try expectEqual(regular.to_str(), "c2c5");
+//
+//     const castle = Move{
+//         .from = Square.E1,
+//         .to = Square.G1,
+//         .move_type = MoveType.CASTLE_SHORT,
+//     };
+//     try expectEqual(castle.to_str(), "e1g1");
+//
+//     const capture_promote = Move{
+//         .from = Square.E7,
+//         .to = Square.D8,
+//         .move_type = MoveType.CAPTURE_PROMOTE_KNIGHT,
+//     };
+//     try expectEqual(capture_promote.to_str(), "e7d8n");
+//
+//     const promote = Move{
+//         .from = Square.E7,
+//         .to = Square.E8,
+//         .move_type = MoveType.PROMOTE_KNIGHT,
+//     };
+//     try expectEqual(promote.to_str(), "e7e8n");
+// }

@@ -18,6 +18,10 @@ pub fn init() void {
 
 pub fn main() !void {
     init();
+    // var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    // defer std.debug.assert(!general_purpose_allocator.deinit());
+
+    // const gpa = general_purpose_allocator.allocator();
 
     var game: Board = undefined;
     mainloop: while (true) {
@@ -31,7 +35,7 @@ pub fn main() !void {
             GuiCommand.isready => send_command(EngineCommand.readyok),
             GuiCommand.debug => {},
             GuiCommand.newgame => game = Board.starting_position(),
-            GuiCommand.position => |pos| game = try Board.from_fen(pos.fen),
+            GuiCommand.position => |pos| game = pos,
             GuiCommand.go => {
                 const best_move = searcher.search(game, 3);
                 try send_command(EngineCommand{ .bestmove = best_move });

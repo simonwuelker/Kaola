@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
+const Bitboard = bitboard.Bitboard;
 const bitops = @import("bitops.zig");
 const movegen = @import("movegen.zig");
 const zobrist = @import("zobrist.zig");
@@ -122,8 +123,12 @@ pub const Piece = enum(u4) {
     black_king = 0b1011,
 
     /// Get the piece color
-    pub fn color(self: *const Piece) Color {
+    pub inline fn color(self: *const Piece) Color {
         return @intToEnum(Color, @enumToInt(self.*) & 1);
+    }
+
+    pub inline fn piece_type(self: *const Piece) PieceType {
+        return @intToEnum(PieceType, @enumToInt(self.*) >> 1);
     }
 };
 
@@ -146,6 +151,22 @@ pub const CastlingRights = packed struct {
     black_kingside: bool,
     /// Bit indicating whether or not black can castle queenside
     black_queenside: bool,
+
+    pub fn queenside(self: *const CastlingRights, comptime color: Color) bool {
+        if (color == Color.white) {
+            return self.white_queenside;
+        } else {
+            return self.black_queenside;
+        }
+    }
+
+    pub fn kingside(self: *const CastlingRights, comptime color: Color) bool {
+        if (color == Color.white) {
+            return self.white_kingside;
+        } else {
+            return self.black_kingside;
+        }
+    }
 
     pub fn none() CastlingRights {
         return CastlingRights{
@@ -174,7 +195,7 @@ pub const Board = struct {
     occupancies: [3]u64,
     active_color: Color,
     castling_rights: CastlingRights,
-    en_passant: ?u6,
+    en_passant: ?Square,
     halfmove_counter: u8,
     fullmove_counter: u8,
     zobrist_hash: u64,
@@ -193,23 +214,23 @@ pub const Board = struct {
         };
     }
 
-    pub fn place_piece(self: *Board, piece: Piece, square: u6) void {
-        const mask = @as(u64, 1) << square;
+    pub fn place_piece(self: *Board, piece: Piece, square: Square) void {
+        const mask = square.as_board();
         self.bb_position[@enumToInt(piece)] |= mask;
         self.occupancies[@enumToInt(piece.color())] |= mask;
         self.occupancies[@enumToInt(Color.both)] |= mask;
-        self.pieces[square] = piece;
+        self.pieces[@enumToInt(square)] = piece;
     }
 
     /// Clearing an already empty square is undefined behaviour
-    pub fn take_piece(self: *Board, square: u6) Piece {
-        const piece = self.pieces[square] orelse unreachable;
-        const mask = @as(u64, 1) << square;
+    pub fn take_piece(self: *Board, square: Square) Piece {
+        const piece = self.pieces[@enumToInt(square)] orelse unreachable;
+        const mask = square.as_board();
 
-        self.pieces[square] = null;
-        self.bb_position[@enumToInt(piece.color)][@enumToInt(piece.piece_type)] ^= mask;
+        self.pieces[@enumToInt(square)] = null;
+        self.bb_position[@enumToInt(piece)] ^= mask;
         self.occupancies[@enumToInt(Color.both)] ^= mask;
-        self.occupancies[@enumToInt(piece.color)] ^= mask;
+        self.occupancies[@enumToInt(piece.color())] ^= mask;
         return piece;
     }
 
@@ -238,19 +259,20 @@ pub const Board = struct {
         while (ranks.next()) |entry| {
             var file: u6 = 0;
             for (entry) |c| {
+                const square = @intToEnum(Square, rank * 8 + file);
                 switch (c) {
-                    'K' => board.place_piece(Piece.white_king, rank * 8 + file),
-                    'Q' => board.place_piece(Piece.white_queen, rank * 8 + file),
-                    'R' => board.place_piece(Piece.white_rook, rank * 8 + file),
-                    'B' => board.place_piece(Piece.white_bishop, rank * 8 + file),
-                    'N' => board.place_piece(Piece.white_knight, rank * 8 + file),
-                    'P' => board.place_piece(Piece.white_pawn, rank * 8 + file),
-                    'k' => board.place_piece(Piece.black_king, rank * 8 + file),
-                    'q' => board.place_piece(Piece.black_queen, rank * 8 + file),
-                    'r' => board.place_piece(Piece.black_rook, rank * 8 + file),
-                    'b' => board.place_piece(Piece.black_bishop, rank * 8 + file),
-                    'n' => board.place_piece(Piece.black_knight, rank * 8 + file),
-                    'p' => board.place_piece(Piece.black_pawn, rank * 8 + file),
+                    'K' => board.place_piece(Piece.white_king, square),
+                    'Q' => board.place_piece(Piece.white_queen, square),
+                    'R' => board.place_piece(Piece.white_rook, square),
+                    'B' => board.place_piece(Piece.white_bishop, square),
+                    'N' => board.place_piece(Piece.white_knight, square),
+                    'P' => board.place_piece(Piece.white_pawn, square),
+                    'k' => board.place_piece(Piece.black_king, square),
+                    'q' => board.place_piece(Piece.black_queen, square),
+                    'r' => board.place_piece(Piece.black_rook, square),
+                    'b' => board.place_piece(Piece.black_bishop, square),
+                    'n' => board.place_piece(Piece.black_knight, square),
+                    'p' => board.place_piece(Piece.black_pawn, square),
                     '1'...'8' => file += @intCast(u3, c - '1'),
                     else => {
                         return FenParseError.InvalidPosition;
@@ -290,7 +312,7 @@ pub const Board = struct {
         const fen_en_passant = parts.next().?;
         board.en_passant = null;
         if (!std.mem.eql(u8, fen_en_passant, "-")) {
-            board.en_passant = @intCast(u6, fen_en_passant[0] - 'a' + (fen_en_passant[1] - '1') * 8);
+            board.en_passant = Square.from_str(fen_en_passant);
         }
 
         // get halfmove counter
@@ -358,12 +380,12 @@ pub const Board = struct {
             MoveType.CASTLE_SHORT => {
                 switch (self.active_color) {
                     Color.white => {
-                        self.place_piece(self.take_piece(@enumToInt(Square.E1)), @enumToInt(Square.G1));
-                        self.place_piece(self.take_piece(@enumToInt(Square.H1)), @enumToInt(Square.F1));
+                        self.place_piece(self.take_piece(Square.E1), Square.G1);
+                        self.place_piece(self.take_piece(Square.H1), Square.F1);
                     },
                     Color.black => {
-                        self.place_piece(self.take_piece(@enumToInt(Square.E8)), @enumToInt(Square.G8));
-                        self.place_piece(self.take_piece(@enumToInt(Square.H8)), @enumToInt(Square.F8));
+                        self.place_piece(self.take_piece(Square.E8), Square.G8);
+                        self.place_piece(self.take_piece(Square.H8), Square.F8);
                     },
                     else => unreachable,
                 }
@@ -371,12 +393,12 @@ pub const Board = struct {
             MoveType.CASTLE_LONG => {
                 switch (self.active_color) {
                     Color.white => {
-                        self.place_piece(self.take_piece(@enumToInt(Square.E1)), @enumToInt(Square.C1));
-                        self.place_piece(self.take_piece(@enumToInt(Square.A1)), @enumToInt(Square.D1));
+                        self.place_piece(self.take_piece(Square.E1), Square.C1);
+                        self.place_piece(self.take_piece(Square.A1), Square.D1);
                     },
                     Color.black => {
-                        self.place_piece(self.take_piece(@enumToInt(Square.E8)), @enumToInt(Square.C8));
-                        self.place_piece(self.take_piece(@enumToInt(Square.A8)), @enumToInt(Square.D8));
+                        self.place_piece(self.take_piece(Square.E8), Square.C8);
+                        self.place_piece(self.take_piece(Square.A8), Square.D8);
                     },
                     else => unreachable,
                 }
@@ -385,58 +407,50 @@ pub const Board = struct {
                 switch (self.active_color) {
                     Color.white => {
                         self.place_piece(self.take_piece(move.from), move.to);
-                        _ = self.take_piece(move.to + 8);
+                        _ = self.take_piece(move.to.down_one());
                     },
                     Color.black => {
-                        self.place_piece(self.take_piece(@enumToInt(Square.E8)), @enumToInt(Square.C8));
-                        _ = self.take_piece(move.to - 8);
+                        self.place_piece(self.take_piece(move.from), move.to);
+                        _ = self.take_piece(move.to.up_one());
                     },
                     else => unreachable,
                 }
             },
             MoveType.PROMOTE_KNIGHT => {
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.knight;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.knight.color(color), move.to);
             },
             MoveType.PROMOTE_BISHOP => {
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.bishop;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.bishop.color(color), move.to);
             },
             MoveType.PROMOTE_ROOK => {
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.rook;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.rook.color(color), move.to);
             },
             MoveType.PROMOTE_QUEEN => {
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.queen;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.queen.color(color), move.to);
             },
             MoveType.CAPTURE_PROMOTE_KNIGHT => {
                 _ = self.take_piece(move.to);
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.knight;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.knight.color(color), move.to);
             },
             MoveType.CAPTURE_PROMOTE_BISHOP => {
                 _ = self.take_piece(move.to);
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.bishop;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.bishop.color(color), move.to);
             },
             MoveType.CAPTURE_PROMOTE_ROOK => {
                 _ = self.take_piece(move.to);
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.rook;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.rook.color(color), move.to);
             },
             MoveType.CAPTURE_PROMOTE_QUEEN => {
                 _ = self.take_piece(move.to);
-                var promoting_piece = self.take_piece(move.from);
-                promoting_piece.piece_type = PieceType.queen;
-                self.place_piece(promoting_piece, move.to);
+                const color = self.take_piece(move.from).color();
+                self.place_piece(PieceType.queen.color(color), move.to);
             },
         }
         self.active_color = self.active_color.other();
@@ -447,19 +461,14 @@ pub const Board = struct {
     /// Note that the king is effectively considered to be nonexistent, as he cannot move
     /// to squares that are x-rayed by an opponent slider piece.
     /// So result is "a bitboard marking all positions that the opponent king cannot move to".
-    pub fn king_unsafe_squares(self: *const Board) u64 {
-        var attacked: u64 = 0;
-        const us = self.active_color;
+    pub fn king_unsafe_squares(self: *const Board, comptime us: Color) u64 {
+        var attacked: Bitboard = 0;
         const them = us.other();
         const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(PieceType.king.color(us));
 
         // pawns
         const opponent_pawns = self.get_bitboard(PieceType.pawn.color(them));
-        if (them == Color.white) {
-            attacked |= bitboard.white_pawn_attacks(opponent_pawns);
-        } else {
-            attacked |= bitboard.black_pawn_attacks(opponent_pawns);
-        }
+        attacked |= bitboard.pawn_attacks(us, opponent_pawns);
 
         // knights
         var knights = self.get_bitboard(PieceType.knight.color(them));

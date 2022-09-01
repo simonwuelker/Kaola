@@ -1,6 +1,7 @@
 //! Implements the Universal chess interface
 const std = @import("std");
 const Move = @import("movegen.zig").Move;
+const Board = @import("board.zig").Board;
 const UCI_COMMAND_MAX_LENGTH = 1024;
 
 /// Note that these are not all uci commands, just the ones
@@ -36,10 +37,7 @@ pub const GuiCommand = union(GuiCommandTag) {
     stop,
     eval,
     board,
-    position: struct {
-        fen: []const u8,
-        moves: []const u8,
-    },
+    position: Board,
     debug: bool,
 };
 
@@ -64,7 +62,7 @@ pub fn next_command() !GuiCommand {
     var buffer = [1]u8{0} ** UCI_COMMAND_MAX_LENGTH;
     const stdin = std.io.getStdIn().reader();
 
-    while (true) {
+    get_command: while (true) {
         const input = (try stdin.readUntilDelimiter(&buffer, '\n'));
         if (input.len == 0) continue;
 
@@ -100,10 +98,14 @@ pub fn next_command() !GuiCommand {
             } else fen: {
                 break :fen pos;
             };
-            return GuiCommand{ .position = .{
-                .fen = fen,
-                .moves = "",
-            } };
+            var board = Board.from_fen(fen) catch continue :get_command;
+            if (std.mem.eql(u8, parts.next().?, "moves")) {
+                while (parts.next()) |move_str| {
+                    const move = Move.from_str(move_str, board) catch continue :get_command;
+                    board.apply(move);
+                }
+            }
+            return GuiCommand{ .position = board };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {
