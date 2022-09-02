@@ -58,7 +58,7 @@ const ROOK_RELEVANT_BITS = [64]u6{
 /// Bit mask for masking off the A file
 const NOT_A_FILE: Bitboard = 0xfefefefefefefefe;
 /// Bit mask for masking off the H file
-const NOT_H_FILE: Bitboard = 0x7f7f7f7f7f7f7f7f;
+pub const NOT_H_FILE: Bitboard = 0x7f7f7f7f7f7f7f7f;
 /// Bit mask for masking off the A and B files
 const NOT_AB_FILE: Bitboard = 0xfcfcfcfcfcfcfcfc;
 /// Bit mask for masking off the G and H files
@@ -184,10 +184,10 @@ fn bishop_relevant_positions(square: Square) Bitboard {
 }
 
 /// Determine the positions whose occupancy is relevant to the moves a rook can make
-fn rook_relevant_positions(square: Square) Bitboard {
+pub fn rook_relevant_positions(square: Square) Bitboard {
     var board: Bitboard = 0;
     board |= (A_FILE << square.file()) & NOT_FIRST_OR_EIGTH_RANK;
-    board |= (EIGTH_RANK << (square.rank())) & NOT_AH_FILE;
+    board |= (EIGTH_RANK << (@enumToInt(square) & ~@as(u6, 0b111))) & NOT_AH_FILE;
     board ^= square.as_board(); // the rooks position itself is not relevant
     return board;
 }
@@ -201,7 +201,7 @@ fn generate_bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
     return board;
 }
 
-fn generate_rook_attacks(square: Square, blocked: Bitboard) Bitboard {
+pub fn generate_rook_attacks(square: Square, blocked: Bitboard) Bitboard {
     var board: u64 = 0;
     board |= attacks_in_direction(square, 8, blocked);
     board |= attacks_in_direction(square, -8, blocked);
@@ -229,7 +229,7 @@ fn populate_occupancy_map(index_: Bitboard, attack_map_: Bitboard, num_bits: u6)
     return occupied;
 }
 
-fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) Bitboard {
+fn find_magic_number(square: Square, num_relevant_positions: u6, comptime bishop: bool) Bitboard {
     var attacks: [4096]Bitboard = undefined;
     var occupancies: [4096]Bitboard = undefined;
     const occupancy_mask = if (bishop) bishop_relevant_positions(square) else rook_relevant_positions(square);
@@ -265,7 +265,6 @@ fn find_magic_number(square: u6, num_relevant_positions: u6, bishop: bool) Bitbo
             } else if (hash_buckets[hash] != attacks[index]) {
                 // hash collision with different attacks, bad magic value
                 // note that we do allow hash collisions as long as they produce the same attack pattern
-                // std.debug.print("collission at {d}\n", .{index});
                 continue :search_magic;
             }
         }
@@ -280,20 +279,19 @@ var bishop_blocking_positions: [64]Bitboard = undefined;
 var rook_attack_table: [64][4096]Bitboard = undefined;
 var rook_blocking_positions: [64]Bitboard = undefined;
 
-fn init_magic_numbers() void {
+pub fn init_magic_numbers() void {
     var square: u6 = 0;
-    while (square < 63) : (square += 1) {
+    while (true) : (square += 1) {
         // bishop_magic_numbers[square] = find_magic_number(square, BISHOP_RELEVANT_BITS[square], true);
         // rook_magic_numbers[square] = find_magic_number(square, ROOK_RELEVANT_BITS[square], false);
-        std.debug.print("0x{x}\n", .{find_magic_number(square, ROOK_RELEVANT_BITS[square], false)});
+        std.debug.print("0x{x}\n", .{find_magic_number(@intToEnum(Square, square), ROOK_RELEVANT_BITS[square], false)});
+        if (square == 63) break;
     }
-    // TODO: find out how to do this properly in zig
-    std.debug.print("0x{x}\n", .{find_magic_number(0, ROOK_RELEVANT_BITS[0], false)});
 }
 
 pub fn init_slider_attacks() void {
     var square_index: u6 = 0;
-    while (square_index < 63) : (square_index += 1) {
+    while (true) : (square_index += 1) {
         const square = @intToEnum(Square, square_index);
         const relevant_positions = bishop_relevant_positions(square);
         bishop_blocking_positions[square_index] = relevant_positions;
@@ -304,9 +302,11 @@ pub fn init_slider_attacks() void {
             const hash = (blocked *% magics.BISHOP_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
             bishop_attack_table[square_index][hash] = generate_bishop_attacks(square, blocked);
         }
+
+        if (square_index == 63) break;
     }
     square_index = 0;
-    while (square_index < 63) : (square_index += 1) {
+    while (true) : (square_index += 1) {
         const square = @intToEnum(Square, square_index);
         const relevant_positions = rook_relevant_positions(square);
         rook_blocking_positions[square_index] = relevant_positions;
@@ -317,6 +317,7 @@ pub fn init_slider_attacks() void {
             const hash = (blocked *% magics.ROOK_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
             rook_attack_table[square_index][hash] = generate_rook_attacks(square, blocked);
         }
+        if (square_index == 63) break;
     }
 }
 
@@ -375,3 +376,51 @@ pub inline fn path_between_squares(from: Square, to: Square) Bitboard {
     return PATH_BETWEEN_SQUARES[@enumToInt(from)][@enumToInt(to)];
 }
 
+test "rook attacks" {
+    const expectEqual = std.testing.expectEqual;
+
+    // C4, D1, D7 and G6 blocked
+    const blocked = 0x800000400400800;
+    try expectEqual(rook_attacks(Square.D4, blocked), 0x80808f408080800);
+
+    try expectEqual(rook_attacks(Square.A1, 0), 0xfe01010101010101);
+}
+
+test "bishop attacks" {
+    const expectEqual = std.testing.expectEqual;
+
+    // C5, F6, G1 and G3 blocked
+    const blocked = 0x4000400004200000;
+    try expectEqual(bishop_attacks(Square.D4, blocked), 0x4122140014200000);
+
+    try expectEqual(bishop_attacks(Square.A1, 0), 0x2040810204080);
+}
+
+test "knight attacks" {
+    const expectEqual = std.testing.expectEqual;
+
+    try expectEqual(knight_attack(Square.D4), 0x14220022140000);
+    try expectEqual(knight_attack(Square.A1), 0x4020000000000);
+}
+
+test "king attacks" {
+    const expectEqual = std.testing.expectEqual;
+
+    try expectEqual(king_attacks(Square.D4.as_board()), 0x1c141c000000);
+    try expectEqual(king_attacks(Square.A1.as_board()), 0x203000000000000);
+}
+
+test "white pawn attacks" {
+    const expectEqual = std.testing.expectEqual;
+
+    // pawns on A3, D5 and H5
+    try expectEqual(pawn_attacks(Color.white, 0x10088000000), 0x200540000);
+
+}
+
+test "black pawn attacks" {
+    const expectEqual = std.testing.expectEqual;
+
+    // pawns on A3, D5 and H5
+    try expectEqual(pawn_attacks(Color.black, 0x10088000000), 0x2005400000000);
+}
