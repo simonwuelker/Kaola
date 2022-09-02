@@ -4,24 +4,72 @@ const std = @import("std");
 const bitboard = @import("bitboard.zig");
 const Bitboard = bitboard.Bitboard;
 const bitops = @import("bitops.zig");
-const movegen = @import("movegen.zig");
+// const movegen = @import("movegen.zig");
 const zobrist = @import("zobrist.zig");
-const Move = movegen.Move;
-const MoveType = movegen.MoveType;
+// const Move = movegen.Move;
+// const MoveType = movegen.MoveType;
 
-// Chess pieces
-const WHITE_KING = Piece.new(Color.white, PieceType.king);
-const WHITE_QUEEN = Piece.new(Color.white, PieceType.queen);
-const WHITE_ROOK = Piece.new(Color.white, PieceType.rook);
-const WHITE_BISHOP = Piece.new(Color.white, PieceType.bishop);
-const WHITE_KNIGHT = Piece.new(Color.white, PieceType.knight);
-const WHITE_PAWN = Piece.new(Color.white, PieceType.pawn);
-const BLACK_KING = Piece.new(Color.black, PieceType.king);
-const BLACK_QUEEN = Piece.new(Color.black, PieceType.queen);
-const BLACK_ROOK = Piece.new(Color.black, PieceType.rook);
-const BLACK_BISHOP = Piece.new(Color.black, PieceType.bishop);
-const BLACK_KNIGHT = Piece.new(Color.black, PieceType.knight);
-const BLACK_PAWN = Piece.new(Color.black, PieceType.pawn);
+fn bool_to_str(val: bool) []const u8 {
+    if (val) {
+        return "true";
+    } else {
+        return "false";
+    }
+}
+
+pub const MoveTag = enum(u3) {
+    castle,
+    double_push,
+    promote,
+    en_passant,
+    capture,
+    quiet,
+};
+
+pub const MoveType = union(MoveTag) {
+    castle: CastleSwaps,
+    double_push: void,
+    en_passant: void,
+    promote: PieceType,
+    capture: PieceType,
+    quiet: PieceType,
+};
+
+pub const Move = struct {
+    from: u64,
+    to: u64,
+    move_type: MoveType,
+};
+
+const WHITE_QUEENSIDE = CastleSwaps{
+    .king = 0x1400000000000000,
+    .rook = 0x900000000000000,
+};
+
+const WHITE_KINGSIDE = CastleSwaps{
+    .king = 0x5000000000000000,
+    .rook = 0xa000000000000000,
+};
+
+const BLACK_KINGSIDE = CastleSwaps{
+    .king = 0x50,
+    .rook = 0xa0,
+};
+
+const BLACK_QUEENSIDE = CastleSwaps{
+    .king = 0x14,
+    .rook = 0x9,
+};
+
+pub const CastleDirection = enum(u1) {
+    kingside,
+    queenside,
+};
+
+const CastleSwaps = struct {
+    king: Bitboard,
+    rook: Bitboard,
+};
 
 // Squares on a chess board
 pub const Square = enum(u6) {
@@ -99,82 +147,79 @@ pub const PieceType = enum(u3) {
     rook,
     queen,
     king,
-
-    /// Build a piece with the desired color
-    pub fn color(self: *const PieceType, desired_color: Color) Piece {
-        std.debug.assert(desired_color != Color.both);
-        return @intToEnum(Piece, @as(u4, @enumToInt(self.*)) << 1 | @truncate(u1, @enumToInt(desired_color)));
-    }
 };
 
-/// Last bit represents piece color, first three bits piece type
-pub const Piece = enum(u4) {
-    white_pawn = 0b0000,
-    black_pawn = 0b0001,
-    white_knight = 0b0010,
-    black_knight = 0b0011,
-    white_bishop = 0b0100,
-    black_bishop = 0b0101,
-    white_rook = 0b0110,
-    black_rook = 0b0111,
-    white_queen = 0b1000,
-    black_queen = 0b1001,
-    white_king = 0b1010,
-    black_king = 0b1011,
-
-    /// Get the piece color
-    pub inline fn color(self: *const Piece) Color {
-        return @intToEnum(Color, @enumToInt(self.*) & 1);
-    }
-
-    pub inline fn piece_type(self: *const Piece) PieceType {
-        return @intToEnum(PieceType, @enumToInt(self.*) >> 1);
-    }
-};
-
-pub const Color = enum(u2) {
-    white,
-    black,
-    both,
-
-    pub inline fn other(self: *const Color) Color {
-        return @intToEnum(Color, 1 - @enumToInt(self.*));
-    }
-};
-
-pub const CastlingRights = packed struct {
-    /// Bit indicating whether or not white can castle kingside
+pub const BoardRights = struct {
+    active_color: Color,
+    ep_square: ?Square,
     white_kingside: bool,
-    /// Bit indicating whether or not white can castle queenside
     white_queenside: bool,
-    /// Bit indicating whether or not black can castle kingside
     black_kingside: bool,
-    /// Bit indicating whether or not black can castle queenside
     black_queenside: bool,
 
-    pub fn queenside(self: *const CastlingRights, comptime color: Color) bool {
-        if (color == Color.white) {
-            return self.white_queenside;
-        } else {
-            return self.black_queenside;
-        }
-    }
+    const Self = @This();
 
-    pub fn kingside(self: *const CastlingRights, comptime color: Color) bool {
-        if (color == Color.white) {
-            return self.white_kingside;
-        } else {
-            return self.black_kingside;
-        }
-    }
-
-    pub fn none() CastlingRights {
-        return CastlingRights{
-            .white_kingside = false,
-            .white_queenside = false,
-            .black_kingside = false,
-            .black_queenside = false,
+    pub fn new(color: Color, ep_square: ?Square, wk: bool, wq: bool, bk: bool, bq: bool) Self {
+        return Self{
+            .active_color = color,
+            .ep_square = ep_square,
+            .white_kingside = wk,
+            .white_queenside = wq,
+            .black_kingside = bk,
+            .black_queenside = bq,
         };
+    }
+
+    pub fn initial() Self {
+        return Self.new(Color.white, null, true, true, true, true);
+    }
+
+    pub fn kingside(self: *const Self, comptime color: Color) bool {
+        switch (color) {
+            Color.white => return self.white_kingside,
+            Color.black => return self.black_kingside,
+        }
+    }
+
+    pub fn queenside(self: *const Self, comptime color: Color) bool {
+        switch (color) {
+            Color.white => return self.white_queenside,
+            Color.black => return self.black_queenside,
+        }
+    }
+
+    pub fn print(self: *const Self, writer: anytype) !void {
+        _ = try std.fmt.format(writer, "Active Color: {s}\n", .{@tagName(self.active_color)});
+        _ = try writer.write("+--------+----------+-----------+\n");
+        _ = try writer.write("| Castle | Kingside | Queenside |\n");
+        _ = try writer.write("+--------+----------+-----------+\n");
+        _ = try std.fmt.format(writer, "| White  |{s:^10}|{s:^11}|\n", .{
+            bool_to_str(self.white_kingside),
+            bool_to_str(self.white_queenside),
+        });
+        _ = try writer.write("+--------+----------+-----------+\n");
+        _ = try std.fmt.format(writer, "| Black  |{s:^10}|{s:^11}|\n", .{
+            bool_to_str(self.black_kingside),
+            bool_to_str(self.black_queenside),
+        });
+        _ = try writer.write("+--------+----------+-----------+\n");
+
+        if (self.ep_square) |square| {
+            _ = try std.fmt.format(writer, "En passant Square: {s}\n", .{SQUARE_NAME[@enumToInt(square)]});
+        } else {
+            _ = try writer.write("No en passant possible\n");
+        }
+    }
+};
+
+pub const Color = enum(u1) {
+    white,
+    black,
+
+    const Self = @This();
+
+    pub inline fn other(self: *const Self) Self {
+        return @intToEnum(Self, 1 - @enumToInt(self.*));
     }
 };
 
@@ -189,95 +234,133 @@ const FenParseError = error{
     InvalidFullMoveCounter,
 };
 
-pub const Board = struct {
-    bb_position: [12]u64,
-    pieces: [64]?Piece,
-    occupancies: [3]u64,
-    active_color: Color,
-    castling_rights: CastlingRights,
-    en_passant: ?Square,
-    halfmove_counter: u8,
-    fullmove_counter: u8,
-    zobrist_hash: u64,
+pub const Position = struct {
+    white_pawns: Bitboard,
+    white_knights: Bitboard,
+    white_bishops: Bitboard,
+    white_rooks: Bitboard,
+    white_queens: Bitboard,
+    white_king: Bitboard,
+    black_pawns: Bitboard,
+    black_knights: Bitboard,
+    black_bishops: Bitboard,
+    black_rooks: Bitboard,
+    black_queens: Bitboard,
+    black_king: Bitboard,
+    black: Bitboard,
+    white: Bitboard,
+    occupied: Bitboard,
 
-    fn new() Board {
-        return Board{
-            .bb_position = [1]u64{0} ** 12,
-            .pieces = [1]?Piece{null} ** 64,
-            .occupancies = [1]u64{0} ** 3,
-            .active_color = Color.white,
-            .castling_rights = CastlingRights.none(),
-            .en_passant = null,
-            .halfmove_counter = 0,
-            .fullmove_counter = 0,
-            .zobrist_hash = 0,
+    const Self = @This();
+
+    fn new(white_pawns: Bitboard, white_knights: Bitboard, white_bishops: Bitboard, white_rooks: Bitboard, white_queens: Bitboard, white_king: Bitboard, black_pawns: Bitboard, black_knights: Bitboard, black_bishops: Bitboard, black_rooks: Bitboard, black_queens: Bitboard, black_king: Bitboard) Self {
+        const white = white_pawns | white_knights | white_bishops | white_rooks | white_queens | white_king;
+        const black = black_pawns | black_knights | black_bishops | black_rooks | black_queens | black_king;
+        return Self{
+            .white_pawns = white_pawns,
+            .white_knights = white_knights,
+            .white_bishops = white_bishops,
+            .white_rooks = white_rooks,
+            .white_queens = white_queens,
+            .white_king = white_king,
+            .black_pawns = black_pawns,
+            .black_knights = black_knights,
+            .black_bishops = black_bishops,
+            .black_rooks = black_rooks,
+            .black_queens = black_queens,
+            .black_king = black_king,
+            .white = white,
+            .black = black,
+            .occupied = white | black,
         };
     }
 
-    pub fn place_piece(self: *Board, piece: Piece, square: Square) void {
-        const mask = square.as_board();
-        self.bb_position[@enumToInt(piece)] |= mask;
-        self.occupancies[@enumToInt(piece.color())] |= mask;
-        self.occupancies[@enumToInt(Color.both)] |= mask;
-        self.pieces[@enumToInt(square)] = piece;
+    pub fn pawns(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white_pawns,
+            Color.black => return self.black_pawns,
+        }
     }
 
-    /// Clearing an already empty square is undefined behaviour
-    pub fn take_piece(self: *Board, square: Square) Piece {
-        const piece = self.pieces[@enumToInt(square)] orelse unreachable;
-        const mask = square.as_board();
+    pub fn knights(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white_knights,
+            Color.black => return self.black_knights,
+        }
+    }
 
-        self.pieces[@enumToInt(square)] = null;
-        self.bb_position[@enumToInt(piece)] ^= mask;
-        self.occupancies[@enumToInt(Color.both)] ^= mask;
-        self.occupancies[@enumToInt(piece.color())] ^= mask;
-        return piece;
+    pub fn bishops(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white_bishops,
+            Color.black => return self.black_bishops,
+        }
+    }
+
+    pub fn rooks(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white_rooks,
+            Color.black => return self.black_rooks,
+        }
+    }
+
+    pub fn queens(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white_queens,
+            Color.black => return self.black_queens,
+        }
+    }
+
+    pub fn king(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white_king,
+            Color.black => return self.black_king,
+        }
+    }
+
+    pub fn occupied_by(self: *const Self, comptime color: Color) Bitboard {
+        switch (color) {
+            Color.white => return self.white,
+            Color.black => return self.black,
+        }
     }
 
     /// Create a new board with the starting position
-    pub fn starting_position() Board {
-        return Board.from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") catch unreachable;
+    pub fn starting_position() Self {
+        return Self.from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR") catch unreachable;
     }
 
-    pub inline fn get_bitboard(self: *const Board, piece: Piece) u64 {
-        return self.bb_position[@enumToInt(piece)];
-    }
+    /// Parse the position from a FEN string
+    pub fn from_fen(fen_position: []const u8) FenParseError!Self {
+        var pieces = [1]Bitboard{0} ** 12;
 
-    pub inline fn get_occupancies(self: *const Board, color: Color) u64 {
-        return self.occupancies[@enumToInt(color)];
-    }
-
-    /// Parse the board state from a FEN string
-    pub fn from_fen(fen: []const u8) FenParseError!Board {
-        var board = Board.new();
-        var parts = std.mem.split(u8, fen, " ");
-
-        // Parse the board position
-        const fen_position = parts.next().?;
         var ranks = std.mem.split(u8, fen_position, "/");
         var rank: u6 = 0;
         while (ranks.next()) |entry| {
             var file: u6 = 0;
             for (entry) |c| {
                 const square = @intToEnum(Square, rank * 8 + file);
-                switch (c) {
-                    'K' => board.place_piece(Piece.white_king, square),
-                    'Q' => board.place_piece(Piece.white_queen, square),
-                    'R' => board.place_piece(Piece.white_rook, square),
-                    'B' => board.place_piece(Piece.white_bishop, square),
-                    'N' => board.place_piece(Piece.white_knight, square),
-                    'P' => board.place_piece(Piece.white_pawn, square),
-                    'k' => board.place_piece(Piece.black_king, square),
-                    'q' => board.place_piece(Piece.black_queen, square),
-                    'r' => board.place_piece(Piece.black_rook, square),
-                    'b' => board.place_piece(Piece.black_bishop, square),
-                    'n' => board.place_piece(Piece.black_knight, square),
-                    'p' => board.place_piece(Piece.black_pawn, square),
-                    '1'...'8' => file += @intCast(u3, c - '1'),
+                const piece_index: u4 = switch (c) {
+                    'P' => 0,
+                    'N' => 1,
+                    'B' => 2,
+                    'R' => 3,
+                    'Q' => 4,
+                    'K' => 5,
+                    'p' => 6,
+                    'n' => 7,
+                    'b' => 8,
+                    'r' => 9,
+                    'q' => 10,
+                    'k' => 11,
+                    '1'...'8' => {
+                        file += @intCast(u4, c - '0');
+                        continue;
+                    },
                     else => {
                         return FenParseError.InvalidPosition;
                     },
-                }
+                };
+                pieces[piece_index] ^= square.as_board();
                 file += 1;
             }
             if (file != 8) return FenParseError.InvalidPosition;
@@ -285,217 +368,218 @@ pub const Board = struct {
         }
         if (rank != 8) return FenParseError.InvalidPosition;
 
-        // get the active side
-        const fen_active_side = parts.next().?;
-        std.debug.assert(fen_active_side.len == 1);
-        board.active_color = switch (fen_active_side[0]) {
-            'w' => Color.white,
-            'b' => Color.black,
-            else => return FenParseError.InvalidActiveSide,
-        };
-
-        // get the castling rights
-        const fen_castling_rights = parts.next().?;
-        board.castling_rights = CastlingRights.none();
-        for (fen_castling_rights) |c| {
-            switch (c) {
-                'K' => board.castling_rights.white_kingside = true,
-                'Q' => board.castling_rights.white_queenside = true,
-                'k' => board.castling_rights.black_kingside = true,
-                'q' => board.castling_rights.black_queenside = true,
-                '-' => break,
-                else => return FenParseError.InvalidCastlingRights,
-            }
-        }
-
-        // get the en passant square
-        const fen_en_passant = parts.next().?;
-        board.en_passant = null;
-        if (!std.mem.eql(u8, fen_en_passant, "-")) {
-            board.en_passant = Square.from_str(fen_en_passant);
-        }
-
-        // get halfmove counter
-        const fen_halfmove_counter = parts.next().?;
-        board.halfmove_counter = std.fmt.parseUnsigned(u8, fen_halfmove_counter, 10) catch return FenParseError.InvalidHalfMoveCounter;
-
-        // get fullmove counter
-        const fen_fullmove_counter = parts.next().?;
-        board.fullmove_counter = std.fmt.parseUnsigned(u8, fen_fullmove_counter, 10) catch return FenParseError.InvalidFullMoveCounter;
-
-        return board;
+        return Self.new(pieces[0], pieces[1], pieces[2], pieces[3], pieces[4], pieces[5], pieces[6], pieces[7], pieces[8], pieces[9], pieces[10], pieces[11]);
     }
 
     /// Print the formatted position to the terminal.
     /// This assumes that the position is valid, i.e no two pieces occupy the same position
-    pub fn print(self: *const Board) void {
+    pub fn print(self: *const Self) !void {
+        const stdout = std.io.getStdOut().writer();
         var i: u6 = 0;
         while (i < 8) : (i += 1) {
             std.debug.print("{d}  ", .{8 - i});
             var j: u6 = 0;
             while (j < 8) : (j += 1) {
-                const square = i * 8 + j;
+                const mask = @intToEnum(Square, i * 8 + j).as_board();
 
-                var c: u8 = '.';
-                if (self.pieces[square]) |piece| {
-                    c = switch (piece) {
-                        Piece.white_pawn => 'P',
-                        Piece.white_knight => 'N',
-                        Piece.white_bishop => 'B',
-                        Piece.white_rook => 'R',
-                        Piece.white_queen => 'Q',
-                        Piece.white_king => 'K',
-                        Piece.black_pawn => 'p',
-                        Piece.black_knight => 'n',
-                        Piece.black_bishop => 'b',
-                        Piece.black_rook => 'r',
-                        Piece.black_queen => 'q',
-                        Piece.black_king => 'k',
-                    };
+                if (self.white_pawns & mask != 0) {
+                    _ = try stdout.write("P");
+                } else if (self.white_knights & mask != 0) {
+                    _ = try stdout.write("N");
+                } else if (self.white_bishops & mask != 0) {
+                    _ = try stdout.write("B");
+                } else if (self.white_rooks & mask != 0) {
+                    _ = try stdout.write("R");
+                } else if (self.white_queens & mask != 0) {
+                    _ = try stdout.write("Q");
+                } else if (self.white_king & mask != 0) {
+                    _ = try stdout.write("K");
+                } else if (self.black_pawns & mask != 0) {
+                    _ = try stdout.write("p");
+                } else if (self.black_knights & mask != 0) {
+                    _ = try stdout.write("n");
+                } else if (self.black_bishops & mask != 0) {
+                    _ = try stdout.write("b");
+                } else if (self.black_rooks & mask != 0) {
+                    _ = try stdout.write("r");
+                } else if (self.black_queens & mask != 0) {
+                    _ = try stdout.write("q");
+                } else if (self.black_king & mask != 0) {
+                    _ = try stdout.write("k");
+                } else {
+                    _ = try stdout.write(".");
                 }
-                std.debug.print("{c} ", .{c});
+                _ = try stdout.write(" ");
             }
             std.debug.print("\n", .{});
         }
         std.debug.print("\n   a b c d e f g h\n", .{});
     }
 
-    pub fn apply(self: *Board, move: Move) void {
-        // contains a few if cases but only on rare move types (castling/en passant)
-        // so it should be fine
-        switch (move.move_type) {
-            MoveType.QUIET => {
-                self.place_piece(self.take_piece(move.from), move.to);
-            },
-            MoveType.CAPTURE => {
-                _ = self.take_piece(move.to);
-                self.place_piece(self.take_piece(move.from), move.to);
-            },
-            MoveType.DOUBLE_PUSH => {
-                self.place_piece(self.take_piece(move.from), move.to);
-                self.en_passant = move.to;
-                self.active_color = self.active_color.other();
-                return; // so we don't hit the en passant reset after the switch
-            },
-            MoveType.CASTLE_SHORT => {
-                switch (self.active_color) {
-                    Color.white => {
-                        self.place_piece(self.take_piece(Square.E1), Square.G1);
-                        self.place_piece(self.take_piece(Square.H1), Square.F1);
+    pub fn make_move(self: *const Self, comptime color: Color, move: Move) Position {
+        const wp = self.white_pawns;
+        const wn = self.white_knights;
+        const wb = self.white_bishops;
+        const wr = self.white_rooks;
+        const wq = self.white_queens;
+        const wk = self.white_king;
+        const bp = self.black_pawns;
+        const bn = self.black_knights;
+        const bb = self.black_bishops;
+        const br = self.black_rooks;
+        const bq = self.black_queens;
+        const bk = self.black_king;
+
+        const from = move.from;
+        const to = move.to;
+        switch (color) {
+            Color.white => {
+                switch (move.move_type) {
+                    MoveTag.castle => |swaps| {
+                        return Self.new(wp, wn, wb, wr ^ swaps.rook, wq, wk ^ swaps.king, bp, bn, bb, br, bq, bk);
                     },
-                    Color.black => {
-                        self.place_piece(self.take_piece(Square.E8), Square.G8);
-                        self.place_piece(self.take_piece(Square.H8), Square.F8);
+                    MoveTag.double_push => {
+                        return Self.new(wp ^ (from | to), wn, wb, wr, wq, wk, bp, bn, bb, br, bq, bk);
                     },
-                    else => unreachable,
+                    MoveTag.promote => |promote_to| {
+                        const r = ~from;
+                        switch (promote_to) {
+                            // zig fmt: off
+                            PieceType.queen  => return Self.new(wp ^ from, wn, wb, wr, wq ^ to, wk, bp, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.rook   => return Self.new(wp ^ from, wn, wb, wr ^ to, wq, wk, bp, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.bishop => return Self.new(wp ^ from, wn, wb ^ to, wr, wq, wk, bp, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.knight => return Self.new(wp ^ from, wn ^ to, wb, wr, wq, wk, bp, bn & r, bb & r, br & r, bq & r, bk),
+                            else => unreachable,
+                            // zig fmt: on
+                        }
+                    },
+                    MoveTag.en_passant => unreachable,
+                    MoveTag.capture => |piece_type| {
+                        const r = ~from;
+                        std.debug.assert(move.to & self.white == 0);
+                        std.debug.assert(to & bk == 0);
+                        const m = (from | to);
+                        switch (piece_type) {
+                            // zig fmt: off
+                            PieceType.pawn   => return Self.new(wp ^ m, wn, wb, wr, wq, wk, bp & r, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.knight => return Self.new(wp, wn ^ m, wb, wr, wq, wk, bp & r, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.bishop => return Self.new(wp, wn, wb ^ m, wr, wq, wk, bp & r, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.rook   => return Self.new(wp, wn, wb, wr ^ m, wq, wk, bp & r, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.queen  => return Self.new(wp, wn, wb, wr, wq ^ m, wk, bp & r, bn & r, bb & r, br & r, bq & r, bk),
+                            PieceType.king   => return Self.new(wp, wn, wb, wr, wq, wk ^ m, bp & r, bn & r, bb & r, br & r, bq & r, bk),
+                            // zig fmt: on
+                        }
+                    },
+                    MoveTag.quiet => |piece_type| {
+                        const m = (from | to);
+                        switch (piece_type) {
+                            // zig fmt: off
+                            PieceType.pawn   => return Self.new(wp ^ m, wn, wb, wr, wq, wk, bp, bn, bb, br, bq, bk),
+                            PieceType.knight => return Self.new(wp, wn ^ m, wb, wr, wq, wk, bp, bn, bb, br, bq, bk),
+                            PieceType.bishop => return Self.new(wp, wn, wb ^ m, wr, wq, wk, bp, bn, bb, br, bq, bk),
+                            PieceType.rook   => return Self.new(wp, wn, wb, wr ^ m, wq, wk, bp, bn, bb, br, bq, bk),
+                            PieceType.queen  => return Self.new(wp, wn, wb, wr, wq ^ m, wk, bp, bn, bb, br, bq, bk),
+                            PieceType.king   => return Self.new(wp, wn, wb, wr, wq, wk ^ m, bp, bn, bb, br, bq, bk),
+                            // zig fmt: on
+                        }
+                    },
                 }
             },
-            MoveType.CASTLE_LONG => {
-                switch (self.active_color) {
-                    Color.white => {
-                        self.place_piece(self.take_piece(Square.E1), Square.C1);
-                        self.place_piece(self.take_piece(Square.A1), Square.D1);
+            Color.black => {
+                switch (move.move_type) {
+                    MoveTag.castle => |swaps| {
+                        return Self(wp, wn, wb, wr, wq, wk, bp, bn, bb, br ^ swaps.rook, bq, bk ^ swaps.king);
                     },
-                    Color.black => {
-                        self.place_piece(self.take_piece(Square.E8), Square.C8);
-                        self.place_piece(self.take_piece(Square.A8), Square.D8);
+                    MoveTag.double_push => {
+                        return Self(wp, wn, wb, wr, wq, wk, bp ^ (from | to), bn, bb, br, bq, bk);
                     },
-                    else => unreachable,
+                    MoveTag.promote => |promote_to| {
+                        const r = ~from;
+                        switch (promote_to) {
+                            // zig fmt: off
+                            PieceType.queen  => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br, bq ^ to, bk),
+                            PieceType.rook   => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br ^ to, bq, bk),
+                            PieceType.bishop => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb ^ to, br, bq, bk),
+                            PieceType.knight => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn ^ to, bb, br, bq, bk),
+                            else => unreachable,
+                            // zig fmt: on
+                        }
+                    },
+                    MoveTag.en_passant => unreachable,
+                    MoveTag.capture => |piece_type| {
+                        const r = ~from;
+                        std.debug.assert(move.to & self.black == 0);
+                        std.debug.assert(to & bk == 0);
+                        const m = (from | to);
+                        std.debug.assert(m & wk == 0);
+                        switch (piece_type) {
+                            // zig fmt: off
+                            PieceType.pawn   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp ^ m, bn, bb, br, bq, bk),
+                            PieceType.knight => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn ^ m, bb, br, bq, bk),
+                            PieceType.bishop => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb ^ m, br, bq, bk),
+                            PieceType.rook   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb, br ^ m, bq, bk),
+                            PieceType.queen  => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb, br, bq ^ m, bk),
+                            PieceType.king   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb, br, bq, bk ^ m),
+                            // zig fmt: on
+                        }
+                    },
+                    MoveTag.quiet => |piece_type| {
+                        const m = (from | to);
+                        switch (piece_type) {
+                            // zig fmt: off
+                            PieceType.pawn   => return Self.new(wp, wn, wb, wr, wq, wk, bp ^ m, bn, bb, br, bq, bk),
+                            PieceType.knight => return Self.new(wp, wn, wb, wr, wq, wk, bp, bn ^ m, bb, br, bq, bk),
+                            PieceType.bishop => return Self.new(wp, wn, wb, wr, wq, wk, bp, bn, bb ^ m, br, bq, bk),
+                            PieceType.rook   => return Self.new(wp, wn, wb, wr, wq, wk, bp, bn, bb, br ^ m, bq, bk),
+                            PieceType.queen  => return Self.new(wp, wn, wb, wr, wq, wk, bp, bn, bb, br, bq ^ m, bk),
+                            PieceType.king   => return Self.new(wp, wn, wb, wr, wq, wk, bp, bn, bb, br, bq, bk ^ m),
+                            // zig fmt: on
+                        }
+                    },
                 }
-            },
-            MoveType.EN_PASSANT => {
-                switch (self.active_color) {
-                    Color.white => {
-                        self.place_piece(self.take_piece(move.from), move.to);
-                        _ = self.take_piece(move.to.down_one());
-                    },
-                    Color.black => {
-                        self.place_piece(self.take_piece(move.from), move.to);
-                        _ = self.take_piece(move.to.up_one());
-                    },
-                    else => unreachable,
-                }
-            },
-            MoveType.PROMOTE_KNIGHT => {
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.knight.color(color), move.to);
-            },
-            MoveType.PROMOTE_BISHOP => {
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.bishop.color(color), move.to);
-            },
-            MoveType.PROMOTE_ROOK => {
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.rook.color(color), move.to);
-            },
-            MoveType.PROMOTE_QUEEN => {
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.queen.color(color), move.to);
-            },
-            MoveType.CAPTURE_PROMOTE_KNIGHT => {
-                _ = self.take_piece(move.to);
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.knight.color(color), move.to);
-            },
-            MoveType.CAPTURE_PROMOTE_BISHOP => {
-                _ = self.take_piece(move.to);
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.bishop.color(color), move.to);
-            },
-            MoveType.CAPTURE_PROMOTE_ROOK => {
-                _ = self.take_piece(move.to);
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.rook.color(color), move.to);
-            },
-            MoveType.CAPTURE_PROMOTE_QUEEN => {
-                _ = self.take_piece(move.to);
-                const color = self.take_piece(move.from).color();
-                self.place_piece(PieceType.queen.color(color), move.to);
             },
         }
-        self.active_color = self.active_color.other();
-        self.en_passant = null;
     }
 
-    /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
-    /// Note that the king is effectively considered to be nonexistent, as he cannot move
-    /// to squares that are x-rayed by an opponent slider piece.
-    /// So result is "a bitboard marking all positions that the opponent king cannot move to".
-    pub fn king_unsafe_squares(self: *const Board, comptime us: Color) u64 {
-        var attacked: Bitboard = 0;
-        const them = us.other();
-        const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(PieceType.king.color(us));
+    // /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
+    // /// Note that the king is effectively considered to be nonexistent, as he cannot move
+    // /// to squares that are x-rayed by an opponent slider piece.
+    // /// So result is "a bitboard marking all positions that the opponent king cannot move to".
+    // pub fn king_unsafe_squares(self: *const Board, comptime us: Color) u64 {
+    //     var attacked: Bitboard = 0;
+    //     const them = us.other();
+    //     const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(PieceType.king.color(us));
 
-        // pawns
-        const opponent_pawns = self.get_bitboard(PieceType.pawn.color(them));
-        attacked |= bitboard.pawn_attacks(us, opponent_pawns);
+    //     // pawns
+    //     const opponent_pawns = self.get_bitboard(PieceType.pawn.color(them));
+    //     attacked |= bitboard.pawn_attacks(us, opponent_pawns);
 
-        // knights
-        var knights = self.get_bitboard(PieceType.knight.color(them));
-        while (knights != 0) : (bitops.pop_ls1b(&knights)) {
-            const square = bitboard.get_lsb_square(knights);
-            attacked |= bitboard.knight_attacks(square.as_board());
-        }
+    //     // knights
+    //     var knights = self.get_bitboard(PieceType.knight.color(them));
+    //     while (knights != 0) : (bitops.pop_ls1b(&knights)) {
+    //         const square = bitboard.get_lsb_square(knights);
+    //         attacked |= bitboard.knight_attacks(square.as_board());
+    //     }
 
-        // bishops
-        var diag_sliders = self.get_bitboard(PieceType.bishop.color(them)) | self.get_bitboard(PieceType.queen.color(them));
-        while (diag_sliders != 0) : (bitops.pop_ls1b(&diag_sliders)) {
-            const square = bitboard.get_lsb_square(diag_sliders);
-            attacked |= bitboard.bishop_attacks(square, ALL_WITHOUT_KING);
-        }
+    //     // bishops
+    //     var diag_sliders = self.get_bitboard(PieceType.bishop.color(them)) | self.get_bitboard(PieceType.queen.color(them));
+    //     while (diag_sliders != 0) : (bitops.pop_ls1b(&diag_sliders)) {
+    //         const square = bitboard.get_lsb_square(diag_sliders);
+    //         attacked |= bitboard.bishop_attacks(square, ALL_WITHOUT_KING);
+    //     }
 
-        // rooks
-        var straight_sliders = self.get_bitboard(PieceType.rook.color(them)) | self.get_bitboard(PieceType.queen.color(them));
-        while (straight_sliders != 0) : (bitops.pop_ls1b(&straight_sliders)) {
-            const square = bitboard.get_lsb_square(straight_sliders);
-            attacked |= bitboard.rook_attacks(square, ALL_WITHOUT_KING);
-        }
+    //     // rooks
+    //     var straight_sliders = self.get_bitboard(PieceType.rook.color(them)) | self.get_bitboard(PieceType.queen.color(them));
+    //     while (straight_sliders != 0) : (bitops.pop_ls1b(&straight_sliders)) {
+    //         const square = bitboard.get_lsb_square(straight_sliders);
+    //         attacked |= bitboard.rook_attacks(square, ALL_WITHOUT_KING);
+    //     }
 
-        // king(s)
-        var kings = self.get_bitboard(PieceType.king.color(them));
-        while (kings != 0) : (bitops.pop_ls1b(&kings)) {
-            attacked |= bitboard.king_attacks(kings);
-        }
-        return attacked;
-    }
+    //     // king(s)
+    //     var kings = self.get_bitboard(PieceType.king.color(them));
+    //     while (kings != 0) : (bitops.pop_ls1b(&kings)) {
+    //         attacked |= bitboard.king_attacks(kings);
+    //     }
+    //     return attacked;
+    // }
 };

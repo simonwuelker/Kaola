@@ -1,230 +1,80 @@
-//! Generates legal chess moves in a given position
+// //! Generates legal chess moves in a given position
 const std = @import("std");
-const bitops = @import("bitops.zig");
+
+const pop_ls1b = @import("bitops.zig").pop_ls1b;
+
+// const Move = board.Move;
+// const BoardRights = board.BoardRights;
+
 const board = @import("board.zig");
-const Piece = board.Piece;
+const Position = board.Position;
 const Color = board.Color;
-const Square = board.Square;
-const PieceType = board.PieceType;
+
+// const Square = board.Square;
+// const PieceType = board.PieceType;
+
 const bitboard = @import("bitboard.zig");
 const Bitboard = bitboard.Bitboard;
+const bishop_attacks = bitboard.bishop_attacks;
+const rook_attacks = bitboard.rook_attacks;
+const get_lsb_square = bitboard.get_lsb_square;
 
-/// Bit mask for masking off the third rank
-const THIRD_RANK: u64 = 0x0000FF0000000000;
-/// Bit mask for masking off the fifth rank
-const FIFTH_RANK: u64 = 0x00000000FF000000;
-
-/// Bitmask for detecting pieces that block white from queenside castling
-const WHITE_QUEENSIDE = 0xe00000000000000;
-/// Bitmask for detecting pieces that block white from kingside castling
-const WHITE_KINGSIDE = 0x6000000000000000;
-/// Bitmask for detecting pieces that block black from queenside castling
-const BLACK_QUEENSIDE = 0xe;
-/// Bitmask for detecting pieces that block black from kingside castling
-const BLACK_KINGSIDE = 0x60;
-
-/// Bitflag representation of move properties, mostly same as
-/// https://github.com/nkarve/surge/blob/c4ea4e2655cc938632011672ddc880fefe7d02a6/src/types.h#L146-L157
-pub const MoveType = enum(u4) {
-    /// The move does not capture anything and isn't special either
-    QUIET,
-    /// A pawn was moved two squares
-    /// This is relevant because of en passant
-    DOUBLE_PUSH,
-    /// Castle Kingside
-    CASTLE_SHORT,
-    /// Castle Queenside
-    CASTLE_LONG,
-    /// The move captures a piece
-    CAPTURE,
-    /// Capture a pawn en-passant
-    EN_PASSANT,
-    /// Promote to a knight
-    PROMOTE_KNIGHT,
-    /// Promote to a rook
-    PROMOTE_ROOK,
-    /// Promote to a bishop
-    PROMOTE_BISHOP,
-    /// Promote to a queen
-    PROMOTE_QUEEN,
-    /// Capture a piece and promote to a knight
-    CAPTURE_PROMOTE_KNIGHT,
-    /// Capture a piece and promote to a rook
-    CAPTURE_PROMOTE_ROOK,
-    /// Capture a piece and promote to a bishop
-    CAPTURE_PROMOTE_BISHOP,
-    /// Capture a piece and promote to a queen
-    CAPTURE_PROMOTE_QUEEN,
-};
-
-pub const Move = struct {
-    /// Source square
-    from: Square,
-    /// Target square
-    to: Square,
-    /// Move properties
-    move_type: MoveType,
-
-    const MoveParseError = error{
-        NoPieceFound,
-        InvalidLength,
-        InvalidPromotion,
-        InvalidSquare,
-    };
-
-    // Formats the move into long algebraic notation (e1e7, g7g8q)
-    pub fn to_str(move: *const Move) [5]u8 {
-        var move_str = [1]u8{0} ** 5;
-        std.mem.copy(u8, move_str[0..2], move.from.to_str()[0..2]);
-        std.mem.copy(u8, move_str[2..4], move.to.to_str()[0..2]);
-        move_str[4] = switch (move.move_type) {
-            MoveType.PROMOTE_QUEEN => 'q',
-            MoveType.CAPTURE_PROMOTE_QUEEN => 'q',
-            MoveType.PROMOTE_ROOK => 'r',
-            MoveType.CAPTURE_PROMOTE_ROOK => 'r',
-            MoveType.PROMOTE_BISHOP => 'b',
-            MoveType.CAPTURE_PROMOTE_BISHOP => 'b',
-            MoveType.PROMOTE_KNIGHT => 'n',
-            MoveType.CAPTURE_PROMOTE_KNIGHT => 'n',
-            else => 0,
-        };
-        return move_str;
-    }
-
-    /// Move is assumed to be more or less correct, only limited safety checks are performed
-    pub fn from_str(str: []const u8, game: board.Board) MoveParseError!Move {
-        _ = str;
-        _ = game;
-        unreachable;
-        // if (str.len != 4 and str.len != 5) return MoveParseError.InvalidLength;
-
-        // const from = Square.from_str(str[0..2]);
-        // const to = Square.from_str(str[2..4]);
-        // const moving_piece = game.pieces[@enumToInt(from)] orelse return MoveParseError.NoPieceFound;
-
-        // // Correctly parsing moves is a long and painful process, so to keep it somewhat organized
-        // // we *first* determine the properties of a move and *then* set to move type.
-        // var is_capture = false;
-        // var is_promotion = false;
-        // var is_en_passant = false;
-        // var is_castle_short = false;
-        // var is_castle_long = false;
-        // var is_double_push = false;
-        // var promote_to: ?PieceType = null;
-
-        // if (str.len == 5) {
-        //     promote_to = switch (str[4]) {
-        //         'q' => PieceType.queen,
-        //         'r' => PieceType.rook,
-        //         'b' => PieceType.bishop,
-        //         'n' => PieceType.knight,
-        //         else => return MoveParseError.InvalidPromotion,
-        //     };
-        // }
-        // if (game.active_color == Color.white and game.castling_rights.white_queenside and from == Square.E1 and to == Square.C1 or
-        //     game.active_color == Color.black and game.castling_rights.black_queenside and from == Square.E8 and to == Square.C8)
-        // {
-        //     is_castle_long = true;
-        // } else if (game.active_color == Color.white and game.castling_rights.white_kingside and from == Square.E1 and to == Square.G1 or
-        //     game.active_color == Color.black and game.castling_rights.black_kingside and from == Square.E8 and to == Square.G8)
-        // {
-        //     is_castle_short = true;
-        // }
-        // // any pawn moves that covers two ranks must be a double push
-        // const from_rank = from.rank();
-        // const to_rank = to.rank();
-        // if (moving_piece.piece_type() == PieceType.pawn and @maximum(from_rank, to_rank) - @minimum(from_rank, to_rank) == 2) {
-        //     is_double_push = true;
-        // }
-        // // if the target square is occupied, thats a capture
-        // if (game.pieces[@enumToInt(to)]) |_| {
-        //     is_capture = true;
-        // }
-        // // Assume that any pawn capture with an empty target is an en passant
-        // if (moving_piece.piece_type() == PieceType.pawn and from.file() != to.file() and !is_capture) {
-        //     is_en_passant = true;
-        // }
-
-        // if (game.active_color == Color.white and moving_piece.piece_type() == PieceType.pawn and to.rank() == 7 or
-        //     game.active_color == Color.black and moving_piece.piece_type() == PieceType.pawn and to.rank() == 0)
-        // {
-        //     is_promotion = true;
-        // }
-
-        // var move_type = MoveType.QUIET;
-        // if (is_castle_long) {
-        //     move_type = MoveType.CASTLE_LONG;
-        // } else if (is_castle_short) {
-        //     move_type = MoveType.CASTLE_SHORT;
-        // } else if (is_en_passant) {
-        //     move_type = MoveType.EN_PASSANT;
-        // } else if (is_double_push) {
-        //     move_type = MoveType.DOUBLE_PUSH;
-        // } else if (is_capture and is_promotion and promote_to == PieceType.queen) {
-        //     move_type = MoveType.CAPTURE_PROMOTE_QUEEN;
-        // } else if (is_capture and is_promotion and promote_to == PieceType.rook) {
-        //     move_type = MoveType.CAPTURE_PROMOTE_ROOK;
-        // } else if (is_capture and is_promotion and promote_to == PieceType.bishop) {
-        //     move_type = MoveType.CAPTURE_PROMOTE_BISHOP;
-        // } else if (is_capture and is_promotion and promote_to == PieceType.knight) {
-        //     move_type = MoveType.CAPTURE_PROMOTE_KNIGHT;
-        // } else if (is_promotion and promote_to == PieceType.queen) {
-        //     move_type = MoveType.PROMOTE_QUEEN;
-        // } else if (is_promotion and promote_to == PieceType.rook) {
-        //     move_type = MoveType.PROMOTE_ROOK;
-        // } else if (is_promotion and promote_to == PieceType.bishop) {
-        //     move_type = MoveType.PROMOTE_BISHOP;
-        // } else if (is_promotion and promote_to == PieceType.knight) {
-        //     move_type = MoveType.PROMOTE_KNIGHT;
-        // } else if (is_capture) {
-        //     move_type = MoveType.CAPTURE;
-        // }
-
-        // // return Move{
-        // //     .from = from,
-        // //     .to = to,
-        // //     .move_type = move_type,
-        // // };
-    }
-};
-
-pub const MoveCallback = fn (move: Move) void;
-
+// const Bitboard = bitboard.Bitboard;
+//
+// /// Bit mask for masking off the third rank
+// const THIRD_RANK: u64 = 0x0000FF0000000000;
+// /// Bit mask for masking off the fifth rank
+// const FIFTH_RANK: u64 = 0x00000000FF000000;
+//
+// /// Bitmask for detecting pieces that block white from queenside castling
+// const WHITE_QUEENSIDE = 0xe00000000000000;
+// /// Bitmask for detecting pieces that block white from kingside castling
+// const WHITE_KINGSIDE = 0x6000000000000000;
+// /// Bitmask for detecting pieces that block black from queenside castling
+// const BLACK_QUEENSIDE = 0xe;
+// /// Bitmask for detecting pieces that block black from kingside castling
+// const BLACK_KINGSIDE = 0x60;
+//
+//
+// pub const MoveCallback = fn (move: Move) void;
+//
 const Pinmask = struct {
-    straight: u64,
-    diagonal: u64,
-    both: u64,
+    straight: Bitboard,
+    diagonal: Bitboard,
+    both: Bitboard,
 };
 
 /// A pinmask contains the squares from the pinning piece (opponent) to our king.
 /// By &-ing possible moves for the pinned pieces with this mask, legal moves are easily generated.
 /// The pinmask includes the pinning piece (capturing resolves the pin) and is split into diagonal/straight
 /// pins to avoid edge cases.
-pub fn generate_pinmask(game: board.Board) Pinmask {
-    const us = game.active_color;
-    const them = us.other();
-    const king_square = bitboard.get_lsb_square(game.get_bitboard(PieceType.king.color(us)));
-    const diag_attackers = game.get_bitboard(PieceType.bishop.color(them)) | game.get_bitboard(PieceType.queen.color(them));
-    const straight_attackers = game.get_bitboard(PieceType.rook.color(them)) | game.get_bitboard(PieceType.queen.color(them));
+pub fn generate_pinmask(comptime us: Color, position: Position) Pinmask {
+    const them = comptime us.other();
+    const king_square = bitboard.get_lsb_square(position.king(us));
+    const diag_attackers = position.bishops(them) | position.queens(them);
+    const straight_attackers = position.rooks(them) | position.queens(them);
 
     // diagonal pins
-    const diag_blockers = bitboard.bishop_attacks(king_square, game.get_occupancies(Color.both)) & game.get_occupancies(us);
-    const diag_xray_attacks = bitboard.bishop_attacks(king_square, game.get_occupancies(Color.both) ^ diag_blockers);
-    var diag_pinners: u64 = diag_xray_attacks & diag_attackers;
-    var diag_pinmask: u64 = diag_pinners; // capturing the pinning piece is valid
-    while (diag_pinners != 0) : (bitops.pop_ls1b(&diag_pinners)) {
-        const pinner_square = bitboard.get_lsb_square(diag_pinners);
-        diag_pinmask |= diag_xray_attacks & bitboard.bishop_attacks(pinner_square, game.get_bitboard(PieceType.king.color(us)));
+    const diag_blockers = bishop_attacks(king_square, position.occupied) & position.occupied_by(us);
+    const diag_xray_attacks = bishop_attacks(king_square, position.occupied ^ diag_blockers);
+    var diag_pinners = diag_xray_attacks & diag_attackers;
+    var diag_pinmask = diag_pinners; // capturing the pinning piece is valid
+    while (diag_pinners != 0) : (pop_ls1b(&diag_pinners)) {
+        const pinner_square = get_lsb_square(diag_pinners);
+        diag_pinmask |= diag_xray_attacks & bishop_attacks(pinner_square, position.king(us));
     }
 
     // straight pins
-    const straight_blockers = bitboard.rook_attacks(king_square, game.get_occupancies(Color.both)) & game.get_occupancies(us);
-    const straight_xray_attacks = bitboard.rook_attacks(king_square, game.get_occupancies(Color.both) ^ straight_blockers);
-    var straight_pinners: u64 = straight_xray_attacks & straight_attackers;
-    var straight_pinmask: u64 = straight_pinners; // capturing the pinning piece is valid
-    while (straight_pinners != 0) : (bitops.pop_ls1b(&straight_pinners)) {
-        const pinner_square = bitboard.get_lsb_square(straight_pinners);
-        straight_pinmask |= straight_xray_attacks & bitboard.rook_attacks(pinner_square, game.get_bitboard(PieceType.king.color(us)));
+    const straight_blockers = rook_attacks(king_square, position.occupied) & position.occupied_by(us);
+    const straight_xray_attacks = rook_attacks(king_square, position.occupied ^ straight_blockers);
+    var straight_pinners = straight_xray_attacks & straight_attackers;
+    var straight_pinmask = straight_pinners; // capturing the pinning piece is valid
+    while (straight_pinners != 0) : (pop_ls1b(&straight_pinners)) {
+        const pinner_square = get_lsb_square(straight_pinners);
+        straight_pinmask |= straight_xray_attacks & rook_attacks(pinner_square, position.king(us));
+        bitboard.print_bitboard(position.king(us), "our king");
+        bitboard.print_bitboard(rook_attacks(pinner_square, position.king(us)), "attacks");
+        std.debug.print("pinner square {s}\n", .{@tagName(pinner_square)});
     }
 
     return Pinmask{
@@ -234,315 +84,316 @@ pub fn generate_pinmask(game: board.Board) Pinmask {
     };
 }
 
-/// The checkmask will be:
-/// * All bits set if our king is not currently in check
-/// * The bits on the path to the checking piece set if the king is in a single check
-/// * No bits set if two pieces are attacking the king
-/// That way, legal non-king moves can be masked. (Because they either have to block the check or 
-/// capture the attacking piece)
-pub fn generate_checkmask(comptime us: Color, game: board.Board) u64 {
-    const them = us.other();
-    const opponent_diag_sliders = game.get_bitboard(PieceType.bishop.color(them)) | game.get_bitboard(PieceType.queen.color(them));
-    const opponent_straight_sliders = game.get_bitboard(PieceType.rook.color(them)) | game.get_bitboard(PieceType.queen.color(them));
-    const king_square = bitboard.get_lsb_square(game.get_bitboard(PieceType.king.color(us)));
-
-    var checkmask: u64 = 0;
-    var in_check: bool = false;
-
-    // there can at most be one diag slider attacking the king (even with promotions, i think)
-    const attacking_diag_slider = bitboard.bishop_attacks(king_square, game.get_occupancies(Color.both)) & opponent_diag_sliders;
-    if (attacking_diag_slider != 0) {
-        const attacker_square = bitboard.get_lsb_square(attacking_diag_slider);
-        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
-        in_check = true;
-    }
-
-    const attacking_straight_slider = bitboard.rook_attacks(king_square, game.get_occupancies(Color.both)) & opponent_straight_sliders;
-    if (attacking_straight_slider != 0) {
-        const attacker_square = bitboard.get_lsb_square(attacking_straight_slider);
-        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
-        if (in_check) return 0; // double check, no way to block/capture
-        in_check = true;
-    }
-
-    const attacking_knight = bitboard.knight_attack(king_square) & game.get_bitboard(PieceType.knight.color(them));
-    if (attacking_knight != 0) {
-        const knight_square = bitboard.get_lsb_square(attacking_knight);
-        checkmask |= knight_square.as_board();
-        if (in_check) return 0; // double check, no way to block/capture
-        in_check = true;
-    }
-
-    const attacking_pawns = bitboard.pawn_attacks(us, game.get_bitboard(PieceType.king.color(us)));
-
-    if (attacking_pawns != 0) {
-        const pawn_square = bitboard.get_lsb_square(attacking_pawns);
-        checkmask |= pawn_square.as_board();
-        if (in_check) return 0; // double check, no way to block/capture
-        in_check = true;
-    }
-
-    if (in_check) return checkmask;
-    return ~@as(u64, 0);
-}
-
-pub fn generate_moves(comptime us: Color, game: board.Board, emit: MoveCallback) void {
-    const them = us.other();
-    const king_unsafe_squares = game.king_unsafe_squares(us);
-    const diag_sliders = game.get_bitboard(PieceType.bishop.color(us)) | game.get_bitboard(PieceType.queen.color(us));
-    const straight_sliders = game.get_bitboard(PieceType.rook.color(us)) | game.get_bitboard(PieceType.queen.color(us));
-    const enemy_or_empty = ~game.get_occupancies(us);
-    const enemy = game.get_occupancies(them);
-    const empty = ~game.get_occupancies(Color.both);
-    const checkmask = generate_checkmask(us, game);
-    const pinmask = generate_pinmask(game);
-
-    // legal king moves
-    const king_board = game.get_bitboard(PieceType.king.color(us));
-    const king_attacks = bitboard.king_attacks(king_board);
-    emit_all(bitboard.get_lsb_square(king_board), king_attacks & empty, emit, MoveType.QUIET);
-    emit_all(bitboard.get_lsb_square(king_board), king_attacks & enemy, emit, MoveType.CAPTURE);
-
-    // when we're in double check, only the king is allowed to move
-    if (checkmask == 0) return;
-
-    // legal knight moves
-    // pinned knights can never move
-    var unpinned_knights = game.get_bitboard(PieceType.knight.color(us)) & ~pinmask.both;
-    while (unpinned_knights != 0) : (bitops.pop_ls1b(&unpinned_knights)) {
-        const square = bitboard.get_lsb_square(unpinned_knights);
-        const moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
-        emit_all(square, moves & empty, emit, MoveType.QUIET);
-        emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    }
-
-    // legal diagonal slider moves
-    // straight pinned diagonal sliders can never move
-    var unpinned_bishops = diag_sliders & ~pinmask.both;
-    while (unpinned_bishops != 0) : (bitops.pop_ls1b(&unpinned_bishops)) {
-        const square = bitboard.get_lsb_square(unpinned_bishops);
-        const moves = bitboard.bishop_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask;
-        emit_all(square, moves & empty, emit, MoveType.QUIET);
-        emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    }
-
-    var pinned_bishops = diag_sliders & pinmask.diagonal;
-    while (pinned_bishops != 0) : (bitops.pop_ls1b(&pinned_bishops)) {
-        const square = bitboard.get_lsb_square(pinned_bishops);
-        const moves = bitboard.bishop_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask & pinmask.diagonal;
-        emit_all(square, moves & empty, emit, MoveType.QUIET);
-        emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    }
-
-    // legal straight slider moves
-    // diagonally pinned straight sliders can never move
-    var unpinned_rooks = straight_sliders & ~pinmask.both;
-    while (unpinned_rooks != 0) : (bitops.pop_ls1b(&unpinned_rooks)) {
-        const square = bitboard.get_lsb_square(unpinned_rooks);
-        var moves = bitboard.rook_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask;
-        emit_all(square, moves & empty, emit, MoveType.QUIET);
-        emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    }
-
-    var pinned_rooks = straight_sliders & pinmask.diagonal;
-    while (pinned_rooks != 0) : (bitops.pop_ls1b(&pinned_rooks)) {
-        const square = bitboard.get_lsb_square(pinned_rooks);
-        var moves = bitboard.rook_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask & pinmask.diagonal;
-        emit_all(square, moves & empty, emit, MoveType.QUIET);
-        emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    }
-
-    // legal pawn moves (moved to external function to avoid repeated if(white)'s
-    // (performance gud, we do constexpr by hand ^^)
-    switch (us) {
-        Color.white => {
-            pawn_moves(Color.white, game, emit, checkmask, pinmask);
-            castle(Color.white, game, emit, king_unsafe_squares);
-        },
-        Color.black => {
-            castle(Color.black, game, emit, king_unsafe_squares);
-        },
-        else => unreachable,
-    }
-}
-
-fn castle(comptime color: Color, game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
-    // cannot castle either way when in check
-    if (color == Color.white) {
-        if (game.get_bitboard(Piece.white_king) & king_unsafe_squares != 0) return;
-    } else {
-        if (game.get_bitboard(Piece.black_king) & king_unsafe_squares != 0) return;
-    }
-
-    // The squares we traverse must not be in check or occupied
-    const travel_blockers = (game.get_occupancies(Color.both) | king_unsafe_squares);
-    const queenside_blockers = travel_blockers & WHITE_QUEENSIDE;
-    const kingside_blockers = travel_blockers & WHITE_KINGSIDE;
-    if (game.castling_rights.queenside(color) and queenside_blockers == 0) {
-        if (color == Color.white) {
-            emit(Move{
-                .from = Square.E1,
-                .to = Square.C1,
-                .move_type = MoveType.CASTLE_LONG,
-            });
-        } else {
-            emit(Move{
-                .from = Square.E8,
-                .to = Square.C8,
-                .move_type = MoveType.CASTLE_LONG,
-            });
-        }
-    }
-
-    if (game.castling_rights.kingside(color) and kingside_blockers == 0) {
-        if (color == Color.white) {
-            emit(Move{
-                .from = Square.E1,
-                .to = Square.G1,
-                .move_type = MoveType.CASTLE_SHORT,
-            });
-        } else {
-            emit(Move{
-                .from = Square.E8,
-                .to = Square.G8,
-                .move_type = MoveType.CASTLE_SHORT,
-            });
-        }
-    }
-}
-
-fn pawn_moves(comptime color: Color, game: board.Board, emit: MoveCallback, checkmask: u64, pinmask: Pinmask) void {
-    // Terminology:
-    // moving => move pawn one square
-    // pushing => move pawn two squares
-    // moving/pushing uses the straight pinmask, capturing the diagonal one (like a queen)
-    const empty = ~game.get_occupancies(Color.both);
-    const white_pawns = game.get_bitboard(Piece.white_pawn);
-
-    // pawn moves
-    var legal_pawn_moves: Bitboard = 0;
-    const straight_pinned_pawns = white_pawns & pinmask.straight;
-    const pinned_pawn_moves = straight_pinned_pawns >> 8 & pinmask.straight & empty; // needed later for pawn pushes
-    legal_pawn_moves |= pinned_pawn_moves;
-
-    const unpinned_pawns = white_pawns & ~pinmask.both;
-    const unpinned_pawn_moves = unpinned_pawns >> 8 & empty;
-    legal_pawn_moves |= unpinned_pawn_moves;
-
-    legal_pawn_moves &= checkmask; // prune moves that leave the king in check
-    while (legal_pawn_moves != 0) : (bitops.pop_ls1b(&legal_pawn_moves)) {
-        const to = bitboard.get_lsb_square(legal_pawn_moves);
-        emit(Move{
-            .from = to.down_one(),
-            .to = to,
-            .move_type = MoveType.QUIET,
-        });
-    }
-
-    // pawn pushes
-    // no pinmask required here - if we were able to move then we are also able to push ^^
-    var pawn_pushes: u64 = ((pinned_pawn_moves | unpinned_pawn_moves) & THIRD_RANK) >> 8 & empty & checkmask;
-    while (pawn_pushes != 0) : (bitops.pop_ls1b(&pawn_pushes)) {
-        const to = bitboard.get_lsb_square(pawn_pushes);
-        emit(Move{
-            .from = to.down_two(),
-            .to = to,
-            .move_type = MoveType.QUIET,
-        });
-    }
-
-    // pawn captures
-    var left_captures: Bitboard = 0;
-    var right_captures: Bitboard = 0;
-
-    const diag_pinned_pawns = white_pawns & pinmask.diagonal;
-    left_captures |= bitboard.pawn_attacks_left(color, diag_pinned_pawns) & pinmask.diagonal;
-    left_captures |= bitboard.pawn_attacks_left(color, unpinned_pawns);
-
-    right_captures |= bitboard.pawn_attacks_right(color, diag_pinned_pawns) & pinmask.diagonal;
-    right_captures |= bitboard.pawn_attacks_right(color, unpinned_pawns);
-
-    left_captures &= game.get_occupancies(Color.black);
-    right_captures &= game.get_occupancies(Color.black);
-    left_captures &= checkmask;
-    right_captures &= checkmask;
-
-    while (left_captures != 0) : (bitops.pop_ls1b(&left_captures)) {
-        const to = bitboard.get_lsb_square(left_captures);
-        emit(Move{
-            .from = to.down_right(),
-            .to = to,
-            .move_type = MoveType.CAPTURE,
-        });
-    }
-
-    while (right_captures != 0) : (bitops.pop_ls1b(&right_captures)) {
-        const to = bitboard.get_lsb_square(right_captures);
-        emit(Move{
-            .from = to.down_left(),
-            .to = to,
-            .move_type = MoveType.CAPTURE,
-        });
-    }
-}
-
-/// Utility tool for emitting multiple moves with a common move type
-inline fn emit_all(from: Square, targets: u64, emit: MoveCallback, move_type: MoveType) void {
-    var remaining_targets = targets;
-    while (remaining_targets != 0) : (bitops.pop_ls1b(&remaining_targets)) {
-        const to = bitboard.get_lsb_square(remaining_targets);
-        emit(Move{
-            .from = from,
-            .to = to,
-            .move_type = move_type,
-        });
-    }
-}
-
-test "checkmask generation" {
-    const expectEqual = std.testing.expectEqual;
-
-    // Simple check
-    const simple = try board.Board.from_fen("8/8/5q2/8/8/2K5/8/8 w - - 0 0");
-    try expectEqual(@as(u7, 3), @popCount(u64, generate_checkmask(simple)));
-
-    // Double check - no moves (except king moves) allowed
-    const double = try board.Board.from_fen("8/8/5q2/8/1p6/2K5/8/8 w - - 0 0");
-    try expectEqual(@as(u64, 0), generate_checkmask(double));
-
-    // No check
-    const no_check = try board.Board.from_fen("8/8/8/3K4/8/8/8/8 w - - 0 0");
-    try expectEqual(~@as(u64, 0), generate_checkmask(no_check));
-}
-
-// test "Move to string" {
+//
+// /// The checkmask will be:
+// /// * All bits set if our king is not currently in check
+// /// * The bits on the path to the checking piece set if the king is in a single check
+// /// * No bits set if two pieces are attacking the king
+// /// That way, legal non-king moves can be masked. (Because they either have to block the check or
+// /// capture the attacking piece)
+// pub fn generate_checkmask(comptime us: Color, game: board.Board) u64 {
+//     const them = us.other();
+//     const opponent_diag_sliders = game.bishops(them) | game.queens(them);
+//     const opponent_straight_sliders = game.get_bitboard(PieceType.rook.color(them)) | game.get_bitboard(PieceType.queen.color(them));
+//     const king_square = bitboard.get_lsb_square(game.get_bitboard(PieceType.king.color(us)));
+//
+//     var checkmask: u64 = 0;
+//     var in_check: bool = false;
+//
+//     // there can at most be one diag slider attacking the king (even with promotions, i think)
+//     const attacking_diag_slider = bitboard.bishop_attacks(king_square, game.get_occupancies(Color.both)) & opponent_diag_sliders;
+//     if (attacking_diag_slider != 0) {
+//         const attacker_square = bitboard.get_lsb_square(attacking_diag_slider);
+//         checkmask |= bitboard.path_between_squares(attacker_square, king_square);
+//         in_check = true;
+//     }
+//
+//     const attacking_straight_slider = bitboard.rook_attacks(king_square, game.get_occupancies(Color.both)) & opponent_straight_sliders;
+//     if (attacking_straight_slider != 0) {
+//         const attacker_square = bitboard.get_lsb_square(attacking_straight_slider);
+//         checkmask |= bitboard.path_between_squares(attacker_square, king_square);
+//         if (in_check) return 0; // double check, no way to block/capture
+//         in_check = true;
+//     }
+//
+//     const attacking_knight = bitboard.knight_attack(king_square) & game.get_bitboard(PieceType.knight.color(them));
+//     if (attacking_knight != 0) {
+//         const knight_square = bitboard.get_lsb_square(attacking_knight);
+//         checkmask |= knight_square.as_board();
+//         if (in_check) return 0; // double check, no way to block/capture
+//         in_check = true;
+//     }
+//
+//     const attacking_pawns = bitboard.pawn_attacks(us, game.get_bitboard(PieceType.king.color(us)));
+//
+//     if (attacking_pawns != 0) {
+//         const pawn_square = bitboard.get_lsb_square(attacking_pawns);
+//         checkmask |= pawn_square.as_board();
+//         if (in_check) return 0; // double check, no way to block/capture
+//         in_check = true;
+//     }
+//
+//     if (in_check) return checkmask;
+//     return ~@as(u64, 0);
+// }
+//
+// pub fn generate_moves(comptime state: BoardRights, pos: Position) void {
+//     const them = us.other();
+//     const king_unsafe_squares = game.king_unsafe_squares(us);
+//     const diag_sliders = game.get_bitboard(PieceType.bishop.color(us)) | game.get_bitboard(PieceType.queen.color(us));
+//     const straight_sliders = game.get_bitboard(PieceType.rook.color(us)) | game.get_bitboard(PieceType.queen.color(us));
+//     const enemy_or_empty = ~game.get_occupancies(us);
+//     const enemy = game.get_occupancies(them);
+//     const empty = ~game.get_occupancies(Color.both);
+//     const checkmask = generate_checkmask(us, game);
+//     const pinmask = generate_pinmask(game);
+//
+//     // legal king moves
+//     const king_board = game.get_bitboard(PieceType.king.color(us));
+//     const king_attacks = bitboard.king_attacks(king_board);
+//     emit_all(bitboard.get_lsb_square(king_board), king_attacks & empty, emit, MoveType.QUIET);
+//     emit_all(bitboard.get_lsb_square(king_board), king_attacks & enemy, emit, MoveType.CAPTURE);
+//
+//     // when we're in double check, only the king is allowed to move
+//     if (checkmask == 0) return;
+//
+//     // legal knight moves
+//     // pinned knights can never move
+//     var unpinned_knights = game.get_bitboard(PieceType.knight.color(us)) & ~pinmask.both;
+//     while (unpinned_knights != 0) : (bitops.pop_ls1b(&unpinned_knights)) {
+//         const square = bitboard.get_lsb_square(unpinned_knights);
+//         const moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
+//         emit_all(square, moves & empty, emit, MoveType.QUIET);
+//         emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
+//     }
+//
+//     // legal diagonal slider moves
+//     // straight pinned diagonal sliders can never move
+//     var unpinned_bishops = diag_sliders & ~pinmask.both;
+//     while (unpinned_bishops != 0) : (bitops.pop_ls1b(&unpinned_bishops)) {
+//         const square = bitboard.get_lsb_square(unpinned_bishops);
+//         const moves = bitboard.bishop_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask;
+//         emit_all(square, moves & empty, emit, MoveType.QUIET);
+//         emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
+//     }
+//
+//     var pinned_bishops = diag_sliders & pinmask.diagonal;
+//     while (pinned_bishops != 0) : (bitops.pop_ls1b(&pinned_bishops)) {
+//         const square = bitboard.get_lsb_square(pinned_bishops);
+//         const moves = bitboard.bishop_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask & pinmask.diagonal;
+//         emit_all(square, moves & empty, emit, MoveType.QUIET);
+//         emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
+//     }
+//
+//     // legal straight slider moves
+//     // diagonally pinned straight sliders can never move
+//     var unpinned_rooks = straight_sliders & ~pinmask.both;
+//     while (unpinned_rooks != 0) : (bitops.pop_ls1b(&unpinned_rooks)) {
+//         const square = bitboard.get_lsb_square(unpinned_rooks);
+//         var moves = bitboard.rook_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask;
+//         emit_all(square, moves & empty, emit, MoveType.QUIET);
+//         emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
+//     }
+//
+//     var pinned_rooks = straight_sliders & pinmask.diagonal;
+//     while (pinned_rooks != 0) : (bitops.pop_ls1b(&pinned_rooks)) {
+//         const square = bitboard.get_lsb_square(pinned_rooks);
+//         var moves = bitboard.rook_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask & pinmask.diagonal;
+//         emit_all(square, moves & empty, emit, MoveType.QUIET);
+//         emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
+//     }
+//
+//     // legal pawn moves (moved to external function to avoid repeated if(white)'s
+//     // (performance gud, we do constexpr by hand ^^)
+//     switch (us) {
+//         Color.white => {
+//             pawn_moves(Color.white, game, emit, checkmask, pinmask);
+//             castle(Color.white, game, emit, king_unsafe_squares);
+//         },
+//         Color.black => {
+//             castle(Color.black, game, emit, king_unsafe_squares);
+//         },
+//         else => unreachable,
+//     }
+// }
+//
+// fn castle(comptime color: Color, game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
+//     // cannot castle either way when in check
+//     if (color == Color.white) {
+//         if (game.get_bitboard(Piece.white_king) & king_unsafe_squares != 0) return;
+//     } else {
+//         if (game.get_bitboard(Piece.black_king) & king_unsafe_squares != 0) return;
+//     }
+//
+//     // The squares we traverse must not be in check or occupied
+//     const travel_blockers = (game.get_occupancies(Color.both) | king_unsafe_squares);
+//     const queenside_blockers = travel_blockers & WHITE_QUEENSIDE;
+//     const kingside_blockers = travel_blockers & WHITE_KINGSIDE;
+//     if (game.castling_rights.queenside(color) and queenside_blockers == 0) {
+//         if (color == Color.white) {
+//             emit(Move{
+//                 .from = Square.E1,
+//                 .to = Square.C1,
+//                 .move_type = MoveType.CASTLE_LONG,
+//             });
+//         } else {
+//             emit(Move{
+//                 .from = Square.E8,
+//                 .to = Square.C8,
+//                 .move_type = MoveType.CASTLE_LONG,
+//             });
+//         }
+//     }
+//
+//     if (game.castling_rights.kingside(color) and kingside_blockers == 0) {
+//         if (color == Color.white) {
+//             emit(Move{
+//                 .from = Square.E1,
+//                 .to = Square.G1,
+//                 .move_type = MoveType.CASTLE_SHORT,
+//             });
+//         } else {
+//             emit(Move{
+//                 .from = Square.E8,
+//                 .to = Square.G8,
+//                 .move_type = MoveType.CASTLE_SHORT,
+//             });
+//         }
+//     }
+// }
+//
+// fn pawn_moves(comptime color: Color, game: board.Board, emit: MoveCallback, checkmask: u64, pinmask: Pinmask) void {
+//     // Terminology:
+//     // moving => move pawn one square
+//     // pushing => move pawn two squares
+//     // moving/pushing uses the straight pinmask, capturing the diagonal one (like a queen)
+//     const empty = ~game.get_occupancies(Color.both);
+//     const white_pawns = game.get_bitboard(Piece.white_pawn);
+//
+//     // pawn moves
+//     var legal_pawn_moves: Bitboard = 0;
+//     const straight_pinned_pawns = white_pawns & pinmask.straight;
+//     const pinned_pawn_moves = straight_pinned_pawns >> 8 & pinmask.straight & empty; // needed later for pawn pushes
+//     legal_pawn_moves |= pinned_pawn_moves;
+//
+//     const unpinned_pawns = white_pawns & ~pinmask.both;
+//     const unpinned_pawn_moves = unpinned_pawns >> 8 & empty;
+//     legal_pawn_moves |= unpinned_pawn_moves;
+//
+//     legal_pawn_moves &= checkmask; // prune moves that leave the king in check
+//     while (legal_pawn_moves != 0) : (bitops.pop_ls1b(&legal_pawn_moves)) {
+//         const to = bitboard.get_lsb_square(legal_pawn_moves);
+//         emit(Move{
+//             .from = to.down_one(),
+//             .to = to,
+//             .move_type = MoveType.QUIET,
+//         });
+//     }
+//
+//     // pawn pushes
+//     // no pinmask required here - if we were able to move then we are also able to push ^^
+//     var pawn_pushes: u64 = ((pinned_pawn_moves | unpinned_pawn_moves) & THIRD_RANK) >> 8 & empty & checkmask;
+//     while (pawn_pushes != 0) : (bitops.pop_ls1b(&pawn_pushes)) {
+//         const to = bitboard.get_lsb_square(pawn_pushes);
+//         emit(Move{
+//             .from = to.down_two(),
+//             .to = to,
+//             .move_type = MoveType.QUIET,
+//         });
+//     }
+//
+//     // pawn captures
+//     var left_captures: Bitboard = 0;
+//     var right_captures: Bitboard = 0;
+//
+//     const diag_pinned_pawns = white_pawns & pinmask.diagonal;
+//     left_captures |= bitboard.pawn_attacks_left(color, diag_pinned_pawns) & pinmask.diagonal;
+//     left_captures |= bitboard.pawn_attacks_left(color, unpinned_pawns);
+//
+//     right_captures |= bitboard.pawn_attacks_right(color, diag_pinned_pawns) & pinmask.diagonal;
+//     right_captures |= bitboard.pawn_attacks_right(color, unpinned_pawns);
+//
+//     left_captures &= game.get_occupancies(Color.black);
+//     right_captures &= game.get_occupancies(Color.black);
+//     left_captures &= checkmask;
+//     right_captures &= checkmask;
+//
+//     while (left_captures != 0) : (bitops.pop_ls1b(&left_captures)) {
+//         const to = bitboard.get_lsb_square(left_captures);
+//         emit(Move{
+//             .from = to.down_right(),
+//             .to = to,
+//             .move_type = MoveType.CAPTURE,
+//         });
+//     }
+//
+//     while (right_captures != 0) : (bitops.pop_ls1b(&right_captures)) {
+//         const to = bitboard.get_lsb_square(right_captures);
+//         emit(Move{
+//             .from = to.down_left(),
+//             .to = to,
+//             .move_type = MoveType.CAPTURE,
+//         });
+//     }
+// }
+//
+// /// Utility tool for emitting multiple moves with a common move type
+// inline fn emit_all(from: Square, targets: u64, emit: MoveCallback, move_type: MoveType) void {
+//     var remaining_targets = targets;
+//     while (remaining_targets != 0) : (bitops.pop_ls1b(&remaining_targets)) {
+//         const to = bitboard.get_lsb_square(remaining_targets);
+//         emit(Move{
+//             .from = from,
+//             .to = to,
+//             .move_type = move_type,
+//         });
+//     }
+// }
+//
+// test "checkmask generation" {
 //     const expectEqual = std.testing.expectEqual;
 //
-//     const regular = Move{
-//         .from = Square.C2,
-//         .to = Square.C5,
-//         .move_type = MoveType.CASTLE_SHORT,
-//     };
-//     try expectEqual(regular.to_str(), "c2c5");
+//     // Simple check
+//     const simple = try board.Board.from_fen("8/8/5q2/8/8/2K5/8/8 w - - 0 0");
+//     try expectEqual(@as(u7, 3), @popCount(u64, generate_checkmask(simple)));
 //
-//     const castle = Move{
-//         .from = Square.E1,
-//         .to = Square.G1,
-//         .move_type = MoveType.CASTLE_SHORT,
-//     };
-//     try expectEqual(castle.to_str(), "e1g1");
+//     // Double check - no moves (except king moves) allowed
+//     const double = try board.Board.from_fen("8/8/5q2/8/1p6/2K5/8/8 w - - 0 0");
+//     try expectEqual(@as(u64, 0), generate_checkmask(double));
 //
-//     const capture_promote = Move{
-//         .from = Square.E7,
-//         .to = Square.D8,
-//         .move_type = MoveType.CAPTURE_PROMOTE_KNIGHT,
-//     };
-//     try expectEqual(capture_promote.to_str(), "e7d8n");
-//
-//     const promote = Move{
-//         .from = Square.E7,
-//         .to = Square.E8,
-//         .move_type = MoveType.PROMOTE_KNIGHT,
-//     };
-//     try expectEqual(promote.to_str(), "e7e8n");
+//     // No check
+//     const no_check = try board.Board.from_fen("8/8/8/3K4/8/8/8/8 w - - 0 0");
+//     try expectEqual(~@as(u64, 0), generate_checkmask(no_check));
 // }
+//
+// // test "Move to string" {
+// //     const expectEqual = std.testing.expectEqual;
+// //
+// //     const regular = Move{
+// //         .from = Square.C2,
+// //         .to = Square.C5,
+// //         .move_type = MoveType.CASTLE_SHORT,
+// //     };
+// //     try expectEqual(regular.to_str(), "c2c5");
+// //
+// //     const castle = Move{
+// //         .from = Square.E1,
+// //         .to = Square.G1,
+// //         .move_type = MoveType.CASTLE_SHORT,
+// //     };
+// //     try expectEqual(castle.to_str(), "e1g1");
+// //
+// //     const capture_promote = Move{
+// //         .from = Square.E7,
+// //         .to = Square.D8,
+// //         .move_type = MoveType.CAPTURE_PROMOTE_KNIGHT,
+// //     };
+// //     try expectEqual(capture_promote.to_str(), "e7d8n");
+// //
+// //     const promote = Move{
+// //         .from = Square.E7,
+// //         .to = Square.E8,
+// //         .move_type = MoveType.PROMOTE_KNIGHT,
+// //     };
+// //     try expectEqual(promote.to_str(), "e7e8n");
+// // }

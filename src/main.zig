@@ -1,13 +1,13 @@
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
-const Board = @import("board.zig").Board;
+const board = @import("board.zig");
 const movegen = @import("movegen.zig");
+// const searcher = @import("searcher.zig");
 const pesto = @import("pesto.zig");
-const searcher = @import("searcher.zig");
-const uci = @import("uci.zig");
-const GuiCommand = uci.GuiCommand;
-const EngineCommand = uci.EngineCommand;
-const send_command = uci.send_command;
+// const uci = @import("uci.zig");
+// const GuiCommand = uci.GuiCommand;
+// const EngineCommand = uci.EngineCommand;
+// const send_command = uci.send_command;
 
 pub fn init() void {
     // init_magic_numbers();
@@ -18,34 +18,53 @@ pub fn init() void {
 
 pub fn main() !void {
     init();
+    const stdout = std.io.getStdOut().writer();
+    // var pos = board.Position.starting_position();
+    const pos = try board.Position.from_fen("3r4/1k2P3/1q6/1B4p1/1n6/4R2R/q2R1K2/8");
+    _ = pos;
+    const board_rights = comptime board.BoardRights.initial();
+    try board_rights.print(stdout);
+    const blocked = @as(u64, 1) << @enumToInt(board.Square.F2);
+    bitboard.print_bitboard(bitboard.rook_attacks(board.Square.A2, blocked), "rook attacks");
+    // bitboard.print_bitboard(movegen.generate_pinmask(board_rights.active_color, pos).both, "all pins");
+    // // movegen.generate_moves(board_rights, pos);
+    // const move = board.Move{
+    //     .from = board.Square.E7.as_board(),
+    //     .to = board.Square.D8.as_board(),
+    //     .move_type = board.MoveType{ .promote = board.PieceType.knight },
+    // };
+    // try pos.print();
+    // const new = pos.make_move(board.Color.white, move);
+    // try new.print();
+
     // var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     // defer std.debug.assert(!general_purpose_allocator.deinit());
 
     // const gpa = general_purpose_allocator.allocator();
 
-    var game: Board = undefined;
-    mainloop: while (true) {
-        const command = try uci.next_command();
-        try switch (command) {
-            GuiCommand.uci => {
-                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "zigchess" } });
-                try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } });
-                try send_command(EngineCommand.uciok);
-            },
-            GuiCommand.isready => send_command(EngineCommand.readyok),
-            GuiCommand.debug => {},
-            GuiCommand.newgame => game = Board.starting_position(),
-            GuiCommand.position => |pos| game = pos,
-            GuiCommand.go => {
-                const best_move = searcher.search(game, 3);
-                try send_command(EngineCommand{ .bestmove = best_move });
-            },
-            GuiCommand.stop => {},
-            GuiCommand.board => game.print(),
-            GuiCommand.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
-            GuiCommand.quit => break :mainloop,
-        };
-    }
+    // var game: Board = undefined;
+    // mainloop: while (true) {
+    //     const command = try uci.next_command();
+    //     try switch (command) {
+    //         GuiCommand.uci => {
+    //             try send_command(EngineCommand{ .id = .{ .key = "name", .value = "zigchess" } });
+    //             try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } });
+    //             try send_command(EngineCommand.uciok);
+    //         },
+    //         GuiCommand.isready => send_command(EngineCommand.readyok),
+    //         GuiCommand.debug => {},
+    //         GuiCommand.newgame => game = Board.starting_position(),
+    //         GuiCommand.position => |pos| game = pos,
+    //         GuiCommand.go => {
+    //             const best_move = searcher.search(game, 3);
+    //             try send_command(EngineCommand{ .bestmove = best_move });
+    //         },
+    //         GuiCommand.stop => {},
+    //         GuiCommand.board => game.print(),
+    //         GuiCommand.eval => std.debug.print("{d}\n", .{pesto.evaluate(game)}),
+    //         GuiCommand.quit => break :mainloop,
+    //     };
+    // }
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
