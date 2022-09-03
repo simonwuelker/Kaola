@@ -1,5 +1,4 @@
-//! Defines the state of a chess board including a FEN parser
-
+//! Defines the state of a chess board including a FEN parser 
 const std = @import("std");
 const bitboard = @import("bitboard.zig");
 const Bitboard = bitboard.Bitboard;
@@ -36,8 +35,8 @@ pub const MoveType = union(MoveTag) {
 };
 
 pub const Move = struct {
-    from: u64,
-    to: u64,
+    from: Bitboard,
+    to: Bitboard,
     move_type: MoveType,
 };
 
@@ -88,7 +87,7 @@ pub const Square = enum(u6) {
         return @intToEnum(Square, ('8' - str[1]) * 8 + (str[0] - 'a'));
     }
 
-    pub inline fn as_board(self: *const Square) u64 {
+    pub inline fn as_board(self: *const Square) Bitboard {
         return @as(u64, 1) << @enumToInt(self.*);
     }
 
@@ -541,45 +540,45 @@ pub const Position = struct {
         }
     }
 
-    // /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
-    // /// Note that the king is effectively considered to be nonexistent, as he cannot move
-    // /// to squares that are x-rayed by an opponent slider piece.
-    // /// So result is "a bitboard marking all positions that the opponent king cannot move to".
-    // pub fn king_unsafe_squares(self: *const Board, comptime us: Color) u64 {
-    //     var attacked: Bitboard = 0;
-    //     const them = us.other();
-    //     const ALL_WITHOUT_KING = self.get_occupancies(Color.both) ^ self.get_bitboard(PieceType.king.color(us));
+    /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
+    /// Note that the king is effectively considered to be nonexistent, as he cannot move
+    /// to squares that are x-rayed by an opponent slider piece.
+    /// So result is "a bitboard marking all positions that the opponent king cannot move to".
+    pub fn king_unsafe_squares(self: *const Self, comptime us: Color) Bitboard {
+        var attacked: Bitboard = 0;
+        const them = comptime us.other();
+        const all_without_king = self.occupied ^ self.king(us);
 
-    //     // pawns
-    //     const opponent_pawns = self.get_bitboard(PieceType.pawn.color(them));
-    //     attacked |= bitboard.pawn_attacks(us, opponent_pawns);
+        // pawns
+        const opponent_pawns = self.pawns(them);
+        attacked |= bitboard.pawn_attacks(them, opponent_pawns);
 
-    //     // knights
-    //     var knights = self.get_bitboard(PieceType.knight.color(them));
-    //     while (knights != 0) : (bitops.pop_ls1b(&knights)) {
-    //         const square = bitboard.get_lsb_square(knights);
-    //         attacked |= bitboard.knight_attacks(square.as_board());
-    //     }
+        // knights
+        attacked |= bitboard.knight_attacks(self.knights(them));
 
-    //     // bishops
-    //     var diag_sliders = self.get_bitboard(PieceType.bishop.color(them)) | self.get_bitboard(PieceType.queen.color(them));
-    //     while (diag_sliders != 0) : (bitops.pop_ls1b(&diag_sliders)) {
-    //         const square = bitboard.get_lsb_square(diag_sliders);
-    //         attacked |= bitboard.bishop_attacks(square, ALL_WITHOUT_KING);
-    //     }
+        // bishops
+        var diag_sliders = self.bishops(them) | self.queens(them);
+        while (diag_sliders != 0) : (bitops.pop_ls1b(&diag_sliders)) {
+            const square = bitboard.get_lsb_square(diag_sliders);
+            attacked |= bitboard.bishop_attacks(square, all_without_king);
+        }
 
-    //     // rooks
-    //     var straight_sliders = self.get_bitboard(PieceType.rook.color(them)) | self.get_bitboard(PieceType.queen.color(them));
-    //     while (straight_sliders != 0) : (bitops.pop_ls1b(&straight_sliders)) {
-    //         const square = bitboard.get_lsb_square(straight_sliders);
-    //         attacked |= bitboard.rook_attacks(square, ALL_WITHOUT_KING);
-    //     }
+        // rooks
+        var straight_sliders = self.rooks(them) | self.queens(them);
+        while (straight_sliders != 0) : (bitops.pop_ls1b(&straight_sliders)) {
+            const square = bitboard.get_lsb_square(straight_sliders);
+            attacked |= bitboard.rook_attacks(square, all_without_king);
+        }
 
-    //     // king(s)
-    //     var kings = self.get_bitboard(PieceType.king.color(them));
-    //     while (kings != 0) : (bitops.pop_ls1b(&kings)) {
-    //         attacked |= bitboard.king_attacks(kings);
-    //     }
-    //     return attacked;
-    // }
+        // king
+        attacked |= bitboard.king_attacks(self.king(them));
+        return attacked;
+    }
 };
+
+test "king unsafe squares" {
+    const expectEqual = std.testing.expectEqual;
+
+    const position = Position.from_fen("k6R/3r4/1p6/8/2n1K3/8/q7/3b4") catch unreachable;
+    try expectEqual(@as(Bitboard, 0xbfe3b4d9d0bf70b), position.king_unsafe_squares(Color.white));
+}

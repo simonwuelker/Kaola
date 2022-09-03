@@ -10,7 +10,7 @@ const pesto = @import("pesto.zig");
 // const send_command = uci.send_command;
 
 pub fn init() void {
-    // init_magic_numbers();
+    // bitboard.init_magic_numbers();
     bitboard.init_slider_attacks();
     bitboard.init_paths_between_squares(); // depends on initialized slider attacks
     pesto.init_tables();
@@ -18,16 +18,21 @@ pub fn init() void {
 
 pub fn main() !void {
     init();
-    const stdout = std.io.getStdOut().writer();
-    // var pos = board.Position.starting_position();
+    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(!general_purpose_allocator.deinit());
+    const gpa = general_purpose_allocator.allocator();
+
     const pos = try board.Position.from_fen("3r4/1k2P3/1q6/1B4p1/1n6/4R2R/q2R1K2/8");
-    _ = pos;
+    try pos.print();
     const board_rights = comptime board.BoardRights.initial();
-    try board_rights.print(stdout);
-    const blocked = @as(u64, 1) << @enumToInt(board.Square.F2);
-    bitboard.print_bitboard(bitboard.rook_attacks(board.Square.A2, blocked), "rook attacks");
-    // bitboard.print_bitboard(movegen.generate_pinmask(board_rights.active_color, pos).both, "all pins");
-    // // movegen.generate_moves(board_rights, pos);
+    const moves = try movegen.generate_moves(board_rights, pos, gpa);
+    std.debug.print("found {d} moves\n", .{moves.items.len});
+    moves.deinit();
+
+    // const stdout = std.io.getStdOut().writer();
+    // // var pos = board.Position.starting_position();
+    // _ = pos;
+    // try board_rights.print(stdout);
     // const move = board.Move{
     //     .from = board.Square.E7.as_board(),
     //     .to = board.Square.D8.as_board(),
@@ -37,17 +42,12 @@ pub fn main() !void {
     // const new = pos.make_move(board.Color.white, move);
     // try new.print();
 
-    // var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    // defer std.debug.assert(!general_purpose_allocator.deinit());
-
-    // const gpa = general_purpose_allocator.allocator();
-
     // var game: Board = undefined;
     // mainloop: while (true) {
     //     const command = try uci.next_command();
     //     try switch (command) {
     //         GuiCommand.uci => {
-    //             try send_command(EngineCommand{ .id = .{ .key = "name", .value = "zigchess" } });
+    //             try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Mephisto" } });
     //             try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } });
     //             try send_command(EngineCommand.uciok);
     //         },
