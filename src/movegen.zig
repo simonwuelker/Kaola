@@ -12,9 +12,7 @@ const Color = board.Color;
 const Move = board.Move;
 const MoveType = board.MoveType;
 const PieceType = board.PieceType;
-
-// const Square = board.Square;
-// const PieceType = board.PieceType;
+const Square = board.Square;
 
 const bitboard = @import("bitboard.zig");
 const Bitboard = bitboard.Bitboard;
@@ -27,14 +25,29 @@ const get_lsb_square = bitboard.get_lsb_square;
 // /// Bit mask for masking off the fifth rank
 // const FIFTH_RANK: u64 = 0x00000000FF000000;
 //
-// /// Bitmask for detecting pieces that block white from queenside castling
-// const WHITE_QUEENSIDE = 0xe00000000000000;
-// /// Bitmask for detecting pieces that block white from kingside castling
-// const WHITE_KINGSIDE = 0x6000000000000000;
-// /// Bitmask for detecting pieces that block black from queenside castling
-// const BLACK_QUEENSIDE = 0xe;
-// /// Bitmask for detecting pieces that block black from kingside castling
-// const BLACK_KINGSIDE = 0x60;
+
+/// Bitmask for detecting pieces that block white from queenside castling
+const WHITE_QUEENSIDE = 0xe00000000000000;
+/// Bitmask for detecting pieces that block white from kingside castling
+const WHITE_KINGSIDE = 0x6000000000000000;
+/// Bitmask for detecting pieces that block black from queenside castling
+const BLACK_QUEENSIDE = 0xe;
+/// Bitmask for detecting pieces that block black from kingside castling
+const BLACK_KINGSIDE = 0x60;
+
+fn kingside_blockers(comptime color: Color) Bitboard {
+    switch (color) {
+        Color.white => return WHITE_KINGSIDE,
+        Color.black => return BLACK_KINGSIDE,
+    }
+}
+
+fn queenside_blockers(comptime color: Color) Bitboard {
+    switch (color) {
+        Color.white => return WHITE_QUEENSIDE,
+        Color.black => return BLACK_QUEENSIDE,
+    }
+}
 
 const Pinmask = struct {
     straight: Bitboard,
@@ -100,19 +113,12 @@ pub fn generate_checkmask(comptime us: Color, position: Position) Bitboard {
     var checkmask: Bitboard = 0;
     var in_check: bool = false;
 
-    // there can at most be one diag slider attacking the king (even with promotions, i think)
-    const attacking_diag_slider = bishop_attacks(king_square, position.occupied) & opponent_diag_sliders;
-    if (attacking_diag_slider != 0) {
-        const attacker_square = get_lsb_square(attacking_diag_slider);
-        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
-        in_check = true;
-    }
+    // Note that pawns/knights cannot cause double check
 
-    const attacking_straight_slider = rook_attacks(king_square, position.occupied) & opponent_straight_sliders;
-    if (attacking_straight_slider != 0) {
-        const attacker_square = get_lsb_square(attacking_straight_slider);
-        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
-        if (in_check) return 0; // double check, no way to block/capture
+    const attacking_pawns = bitboard.pawn_attacks(us, position.king(us)) & position.pawns(them);
+    if (attacking_pawns != 0) {
+        const pawn_square = get_lsb_square(attacking_pawns);
+        checkmask |= pawn_square.as_board();
         in_check = true;
     }
 
@@ -120,15 +126,22 @@ pub fn generate_checkmask(comptime us: Color, position: Position) Bitboard {
     if (attacking_knight != 0) {
         const knight_square = get_lsb_square(attacking_knight);
         checkmask |= knight_square.as_board();
+        in_check = true;
+    }
+
+    // there can at most be one diag slider attacking the king (even with promotions, i think)
+    const attacking_diag_slider = bishop_attacks(king_square, position.occupied) & opponent_diag_sliders;
+    if (attacking_diag_slider != 0) {
+        const attacker_square = get_lsb_square(attacking_diag_slider);
+        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
 
-    const attacking_pawns = bitboard.pawn_attacks(us, position.king(us)) & position.pawns(them);
-
-    if (attacking_pawns != 0) {
-        const pawn_square = get_lsb_square(attacking_pawns);
-        checkmask |= pawn_square.as_board();
+    const attacking_straight_slider = rook_attacks(king_square, position.occupied) & opponent_straight_sliders;
+    if (attacking_straight_slider != 0) {
+        const attacker_square = get_lsb_square(attacking_straight_slider);
+        checkmask |= bitboard.path_between_squares(attacker_square, king_square);
         if (in_check) return 0; // double check, no way to block/capture
         in_check = true;
     }
@@ -150,26 +163,25 @@ fn add_all(from: Bitboard, moves: Bitboard, list: *ArrayList(Move), move_type: M
 }
 
 // Caller owns returned memory
-pub fn generate_moves(comptime state: BoardRights, pos: Position, gpa: anytype) !ArrayList(Move) {
-    const us = comptime state.active_color;
-    const them = comptime state.active_color.other();
+pub fn generate_moves(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move)) !void {
+    const us = comptime board_rights.active_color;
+    const them = comptime us.other();
     const king_unsafe_squares = pos.king_unsafe_squares(us);
-    // const diag_sliders = pos.bishops(us) | pos.queens(us);
-    // const straight_sliders = pos.rooks(us) | pos.queens(us);
+    const diag_sliders = pos.bishops(us) | pos.queens(us);
+    const straight_sliders = pos.rooks(us) | pos.queens(us);
     const enemy_or_empty = ~pos.occupied_by(us);
     const enemy = pos.occupied_by(them);
     const empty = ~pos.occupied;
     const checkmask = generate_checkmask(us, pos);
     const pinmask = generate_pinmask(us, pos);
-    var move_list = ArrayList(Move).init(gpa);
 
     // legal king moves
     const king_attacks = bitboard.king_attacks(pos.king(us)) & ~king_unsafe_squares;
-    try add_all(pos.king(us), king_attacks & empty, &move_list, MoveType{ .quiet = PieceType.king });
-    try add_all(pos.king(us), king_attacks & enemy, &move_list, MoveType{ .capture = PieceType.king });
+    try add_all(pos.king(us), king_attacks & empty, move_list, MoveType{ .quiet = PieceType.king });
+    try add_all(pos.king(us), king_attacks & enemy, move_list, MoveType{ .capture = PieceType.king });
 
     // when we're in double check, only the king is allowed to move
-    if (checkmask == 0) return move_list;
+    if (checkmask == 0) return;
 
     // legal knight moves
     // pinned knights can never move
@@ -177,143 +189,164 @@ pub fn generate_moves(comptime state: BoardRights, pos: Position, gpa: anytype) 
     while (unpinned_knights != 0) : (pop_ls1b(&unpinned_knights)) {
         const square = get_lsb_square(unpinned_knights);
         const moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
-        try add_all(square.as_board(), moves & empty, &move_list, MoveType{ .quiet = PieceType.knight });
-        try add_all(square.as_board(), moves & enemy, &move_list, MoveType{ .capture = PieceType.knight });
+        try add_all(square.as_board(), moves & empty, move_list, MoveType{ .quiet = PieceType.knight });
+        try add_all(square.as_board(), moves & enemy, move_list, MoveType{ .capture = PieceType.knight });
     }
-    return move_list;
 
-    // // legal diagonal slider moves
-    // // straight pinned diagonal sliders can never move
-    // var unpinned_bishops = diag_sliders & ~pinmask.both;
-    // while (unpinned_bishops != 0) : (bitops.pop_ls1b(&unpinned_bishops)) {
-    //     const square = bitboard.get_lsb_square(unpinned_bishops);
-    //     const moves = bitboard.bishop_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask;
-    //     emit_all(square, moves & empty, emit, MoveType.QUIET);
-    //     emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    // }
+    // legal diagonal slider moves
+    // straight pinned diagonal sliders can never move
+    var unpinned_bishops = diag_sliders & ~pinmask.both;
+    var pinned_bishops = diag_sliders & pinmask.diagonal;
+    while (unpinned_bishops != 0) : (pop_ls1b(&unpinned_bishops)) {
+        const square = get_lsb_square(unpinned_bishops);
+        const moves = bishop_attacks(square, pos.occupied) & enemy_or_empty & checkmask;
+        const from = square.as_board();
 
-    // var pinned_bishops = diag_sliders & pinmask.diagonal;
-    // while (pinned_bishops != 0) : (bitops.pop_ls1b(&pinned_bishops)) {
-    //     const square = bitboard.get_lsb_square(pinned_bishops);
-    //     const moves = bitboard.bishop_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask & pinmask.diagonal;
-    //     emit_all(square, moves & empty, emit, MoveType.QUIET);
-    //     emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    // }
+        if (from & pos.bishops(us) != 0) {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.bishop });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.bishop });
+        } else {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
+        }
+    }
 
-    // // legal straight slider moves
-    // // diagonally pinned straight sliders can never move
-    // var unpinned_rooks = straight_sliders & ~pinmask.both;
-    // while (unpinned_rooks != 0) : (bitops.pop_ls1b(&unpinned_rooks)) {
-    //     const square = bitboard.get_lsb_square(unpinned_rooks);
-    //     var moves = bitboard.rook_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask;
-    //     emit_all(square, moves & empty, emit, MoveType.QUIET);
-    //     emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    // }
+    while (pinned_bishops != 0) : (pop_ls1b(&pinned_bishops)) {
+        const square = get_lsb_square(pinned_bishops);
+        const moves = bishop_attacks(square, pos.occupied) & enemy_or_empty & checkmask & pinmask.diagonal;
+        const from = square.as_board();
 
-    // var pinned_rooks = straight_sliders & pinmask.diagonal;
-    // while (pinned_rooks != 0) : (bitops.pop_ls1b(&pinned_rooks)) {
-    //     const square = bitboard.get_lsb_square(pinned_rooks);
-    //     var moves = bitboard.rook_attacks(square, game.get_occupancies(Color.both)) & enemy_or_empty & checkmask & pinmask.diagonal;
-    //     emit_all(square, moves & empty, emit, MoveType.QUIET);
-    //     emit_all(square, moves & enemy, emit, MoveType.CAPTURE);
-    // }
+        if (from & pos.bishops(us) != 0) {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.bishop });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.bishop });
+        } else {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
+        }
+    }
 
-    // // legal pawn moves (moved to external function to avoid repeated if(white)'s
-    // // (performance gud, we do constexpr by hand ^^)
-    // switch (us) {
-    //     Color.white => {
-    //         pawn_moves(Color.white, game, emit, checkmask, pinmask);
-    //         castle(Color.white, game, emit, king_unsafe_squares);
-    //     },
-    //     Color.black => {
-    //         castle(Color.black, game, emit, king_unsafe_squares);
-    //     },
-    //     else => unreachable,
-    // }
+    // legal straight slider moves
+    // diagonally pinned straight sliders can never move
+    var unpinned_rooks = straight_sliders & ~pinmask.both;
+    while (unpinned_rooks != 0) : (pop_ls1b(&unpinned_rooks)) {
+        const square = get_lsb_square(unpinned_rooks);
+        const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask;
+        const from = square.as_board();
+
+        if (from & pos.rooks(us) != 0) {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.rook });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.rook });
+        } else {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
+        }
+    }
+
+    var pinned_rooks = straight_sliders & pinmask.diagonal;
+    while (pinned_rooks != 0) : (pop_ls1b(&pinned_rooks)) {
+        const square = get_lsb_square(pinned_rooks);
+        const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask & pinmask.diagonal;
+        const from = square.as_board();
+
+        if (from & pos.rooks(us) != 0) {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.rook });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.rook });
+        } else {
+            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
+            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
+        }
+    }
+
+    // try pawn_moves(us, pos, move_list, checkmask, pinmask);
+    try castle(board_rights, pos, move_list, king_unsafe_squares);
+    return;
 }
-//
-// fn castle(comptime color: Color, game: board.Board, emit: MoveCallback, king_unsafe_squares: u64) void {
-//     // cannot castle either way when in check
-//     if (color == Color.white) {
-//         if (game.get_bitboard(Piece.white_king) & king_unsafe_squares != 0) return;
-//     } else {
-//         if (game.get_bitboard(Piece.black_king) & king_unsafe_squares != 0) return;
-//     }
-//
-//     // The squares we traverse must not be in check or occupied
-//     const travel_blockers = (game.get_occupancies(Color.both) | king_unsafe_squares);
-//     const queenside_blockers = travel_blockers & WHITE_QUEENSIDE;
-//     const kingside_blockers = travel_blockers & WHITE_KINGSIDE;
-//     if (game.castling_rights.queenside(color) and queenside_blockers == 0) {
-//         if (color == Color.white) {
-//             emit(Move{
-//                 .from = Square.E1,
-//                 .to = Square.C1,
-//                 .move_type = MoveType.CASTLE_LONG,
-//             });
-//         } else {
-//             emit(Move{
-//                 .from = Square.E8,
-//                 .to = Square.C8,
-//                 .move_type = MoveType.CASTLE_LONG,
-//             });
-//         }
-//     }
-//
-//     if (game.castling_rights.kingside(color) and kingside_blockers == 0) {
-//         if (color == Color.white) {
-//             emit(Move{
-//                 .from = Square.E1,
-//                 .to = Square.G1,
-//                 .move_type = MoveType.CASTLE_SHORT,
-//             });
-//         } else {
-//             emit(Move{
-//                 .from = Square.E8,
-//                 .to = Square.G8,
-//                 .move_type = MoveType.CASTLE_SHORT,
-//             });
-//         }
-//     }
-// }
-//
-// fn pawn_moves(comptime color: Color, game: board.Board, emit: MoveCallback, checkmask: u64, pinmask: Pinmask) void {
+
+fn castle(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move), king_unsafe_squares: Bitboard) !void {
+    const us = comptime board_rights.active_color;
+    // cannot castle either way when in check
+    if (pos.king(us) & king_unsafe_squares != 0) return;
+
+    // The squares we traverse must not be in check or occupied
+    const blockers = pos.occupied | king_unsafe_squares;
+    if (board_rights.queenside(us) and blockers & queenside_blockers(us) == 0) {
+        switch (us) {
+            Color.white => {
+                try move_list.append(Move{
+                    .from = Square.E1.as_board(),
+                    .to = Square.C1.as_board(),
+                    .move_type = MoveType{ .castle = board.WHITE_QUEENSIDE },
+                });
+            },
+            Color.black => {
+                try move_list.append(Move{
+                    .from = Square.E8.as_board(),
+                    .to = Square.C8.as_board(),
+                    .move_type = MoveType{ .castle = board.BLACK_QUEENSIDE },
+                });
+            },
+        }
+    }
+
+    if (board_rights.kingside(us) and blockers & kingside_blockers(us) == 0) {
+        switch (us) {
+            Color.white => {
+                try move_list.append(Move{
+                    .from = Square.E1.as_board(),
+                    .to = Square.G1.as_board(),
+                    .move_type = MoveType{ .castle = board.WHITE_KINGSIDE },
+                });
+            },
+            Color.black => {
+                try move_list.append(Move{
+                    .from = Square.E8.as_board(),
+                    .to = Square.G8.as_board(),
+                    .move_type = MoveType{ .castle = board.BLACK_KINGSIDE },
+                });
+            },
+        }
+    }
+}
+
+// fn pawn_moves(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move), checkmask: Bitboard, pinmask: Pinmask) void {
 //     // Terminology:
 //     // moving => move pawn one square
 //     // pushing => move pawn two squares
 //     // moving/pushing uses the straight pinmask, capturing the diagonal one (like a queen)
-//     const empty = ~game.get_occupancies(Color.both);
-//     const white_pawns = game.get_bitboard(Piece.white_pawn);
+//     const us = comptime board_rights.active_color;
+//     const them = comptime us.other();
+//     const empty = ~pos.occupied;
+//     const our_pawns = pos.pawns(us);
 //
 //     // pawn moves
 //     var legal_pawn_moves: Bitboard = 0;
-//     const straight_pinned_pawns = white_pawns & pinmask.straight;
+//     const straight_pinned_pawns = our_pawns & pinmask.straight;
 //     const pinned_pawn_moves = straight_pinned_pawns >> 8 & pinmask.straight & empty; // needed later for pawn pushes
 //     legal_pawn_moves |= pinned_pawn_moves;
 //
-//     const unpinned_pawns = white_pawns & ~pinmask.both;
+//     const unpinned_pawns = our_pawns & ~pinmask.both;
 //     const unpinned_pawn_moves = unpinned_pawns >> 8 & empty;
 //     legal_pawn_moves |= unpinned_pawn_moves;
 //
 //     legal_pawn_moves &= checkmask; // prune moves that leave the king in check
-//     while (legal_pawn_moves != 0) : (bitops.pop_ls1b(&legal_pawn_moves)) {
-//         const to = bitboard.get_lsb_square(legal_pawn_moves);
-//         emit(Move{
-//             .from = to.down_one(),
-//             .to = to,
-//             .move_type = MoveType.QUIET,
+//     while (legal_pawn_moves != 0) : (pop_ls1b(&legal_pawn_moves)) {
+//         const to = get_lsb_square(legal_pawn_moves);
+//         try move_list.append(Move{
+//             .from = to.down_one().as_board(),
+//             .to = to.as_board(),
+//             .move_type = MoveType{ .quiet = PieceType.pawn },
 //         });
 //     }
 //
 //     // pawn pushes
 //     // no pinmask required here - if we were able to move then we are also able to push ^^
-//     var pawn_pushes: u64 = ((pinned_pawn_moves | unpinned_pawn_moves) & THIRD_RANK) >> 8 & empty & checkmask;
+//     var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & THIRD_RANK) >> 8 & empty & checkmask;
 //     while (pawn_pushes != 0) : (bitops.pop_ls1b(&pawn_pushes)) {
 //         const to = bitboard.get_lsb_square(pawn_pushes);
-//         emit(Move{
+//         try move_list.append(Move{
 //             .from = to.down_two(),
 //             .to = to,
-//             .move_type = MoveType.QUIET,
+//             .move_type = MoveType.double_push,
 //         });
 //     }
 //
@@ -328,44 +361,30 @@ pub fn generate_moves(comptime state: BoardRights, pos: Position, gpa: anytype) 
 //     right_captures |= bitboard.pawn_attacks_right(color, diag_pinned_pawns) & pinmask.diagonal;
 //     right_captures |= bitboard.pawn_attacks_right(color, unpinned_pawns);
 //
-//     left_captures &= game.get_occupancies(Color.black);
-//     right_captures &= game.get_occupancies(Color.black);
+//     left_captures &= game.occupied_by(them);
+//     right_captures &= game.occupied_by(them);
 //     left_captures &= checkmask;
 //     right_captures &= checkmask;
 //
 //     while (left_captures != 0) : (bitops.pop_ls1b(&left_captures)) {
 //         const to = bitboard.get_lsb_square(left_captures);
 //         emit(Move{
-//             .from = to.down_right(),
-//             .to = to,
-//             .move_type = MoveType.CAPTURE,
+//             .from = to.down_right().as_board(),
+//             .to = to.as_board(),
+//             .move_type = MoveType{ .capture = PieceType.pawn },
 //         });
 //     }
 //
 //     while (right_captures != 0) : (bitops.pop_ls1b(&right_captures)) {
 //         const to = bitboard.get_lsb_square(right_captures);
 //         emit(Move{
-//             .from = to.down_left(),
-//             .to = to,
-//             .move_type = MoveType.CAPTURE,
+//             .from = to.down_left().as_board(),
+//             .to = to.as_board(),
+//             .move_type = MoveType{ .capture = PieceType.pawn },
 //         });
 //     }
 // }
-//
-// /// Utility tool for emitting multiple moves with a common move type
-// inline fn emit_all(from: Square, targets: u64, emit: MoveCallback, move_type: MoveType) void {
-//     var remaining_targets = targets;
-//     while (remaining_targets != 0) : (bitops.pop_ls1b(&remaining_targets)) {
-//         const to = bitboard.get_lsb_square(remaining_targets);
-//         emit(Move{
-//             .from = from,
-//             .to = to,
-//             .move_type = move_type,
-//         });
-//     }
-// }
-//
-//
+
 // // test "Move to string" {
 // //     const expectEqual = std.testing.expectEqual;
 // //
@@ -397,6 +416,150 @@ pub fn generate_moves(comptime state: BoardRights, pos: Position, gpa: anytype) 
 // //     };
 // //     try expectEqual(promote.to_str(), "e7e8n");
 // // }
+
+pub fn generate_moves_entry(board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move)) !void {
+    const w = board_rights.active_color == Color.white;
+    const ep = board_rights.en_passant;
+    const wk = board_rights.white_kingside;
+    const wq = board_rights.white_queenside;
+    const bk = board_rights.black_kingside;
+    const bq = board_rights.black_queenside;
+    const white = Color.white;
+    // const black = Color.black;
+
+    // zig fmt: off
+    if        ( w and  ep and  wk and  wq and  bk and  bq) {
+        try generate_moves(comptime BoardRights.new(white,  true,  true,  true,  true,  true), pos, move_list);
+    }
+    // } else if ( w and  ep and  wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white,  true,  true,  true,  true, false), pos, move_list);
+    // } else if ( w and  ep and  wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(white,  true,  true,  true, false,  true), pos, move_list);
+    // } else if ( w and  ep and  wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white,  true,  true,  true, false, false), pos, move_list);
+    // } else if ( w and  ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white,  true,  true, false,  true,  true), pos, move_list);
+    // } else if ( w and  ep and  wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(white,  true,  true, false,  true, false), pos, move_list);
+    // } else if ( w and  ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white,  true,  true, false, false,  true), pos, move_list);
+    // } else if ( w and  ep and  wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(white,  true,  true, false, false, false), pos, move_list);
+    // } else if ( w and  ep and !wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white,  true, false,  true,  true,  true), pos, move_list);
+    // } else if ( w and  ep and !wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white,  true, false,  true,  true, false), pos, move_list);
+    // } else if ( w and  ep and !wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(white,  true, false,  true, false,  true), pos, move_list);
+    // } else if ( w and  ep and !wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white,  true, false,  true, false, false), pos, move_list);
+    // } else if ( w and  ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white,  true, false, false,  true,  true), pos, move_list);
+    // } else if ( w and  ep and !wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(white,  true, false, false,  true, false), pos, move_list);
+    // } else if ( w and  ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white,  true, false, false, false,  true), pos, move_list);
+    // } else if ( w and  ep and !wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(white,  true, false, false, false, false), pos, move_list);
+    // } else if ( w and !ep and  wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white, false,  true,  true,  true,  true), pos, move_list);
+    // } else if ( w and !ep and  wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white, false,  true,  true,  true, false), pos, move_list);
+    // } else if ( w and !ep and  wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(white, false,  true,  true, false,  true), pos, move_list);
+    // } else if ( w and !ep and  wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white, false,  true,  true, false, false), pos, move_list);
+    // } else if ( w and !ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white, false,  true, false,  true,  true), pos, move_list);
+    // } else if ( w and !ep and  wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(white, false,  true, false,  true, false), pos, move_list);
+    // } else if ( w and !ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white, false,  true, false, false,  true), pos, move_list);
+    // } else if ( w and !ep and  wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(white, false,  true, false, false, false), pos, move_list);
+    // } else if ( w and !ep and !wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white, false, false,  true,  true,  true), pos, move_list);
+    // } else if ( w and !ep and !wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white, false, false,  true,  true, false), pos, move_list);
+    // } else if ( w and !ep and !wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(white, false, false,  true, false,  true), pos, move_list);
+    // } else if ( w and !ep and !wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(white, false, false,  true, false, false), pos, move_list);
+    // } else if ( w and !ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white, false, false, false,  true,  true), pos, move_list);
+    // } else if ( w and !ep and !wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(white, false, false, false,  true, false), pos, move_list);
+    // } else if ( w and !ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(white, false, false, false, false,  true), pos, move_list);
+    // } else if ( w and !ep and !wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(white, false, false, false, false, false), pos, move_list);
+    // } else if (!w and  ep and  wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black,  true,  true,  true,  true,  true), pos, move_list);
+    // } else if (!w and  ep and  wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black,  true,  true,  true,  true, false), pos, move_list);
+    // } else if (!w and  ep and  wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(black,  true,  true,  true, false,  true), pos, move_list);
+    // } else if (!w and  ep and  wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black,  true,  true,  true, false, false), pos, move_list);
+    // } else if (!w and  ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black,  true,  true, false,  true,  true), pos, move_list);
+    // } else if (!w and  ep and  wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(black,  true,  true, false,  true, false), pos, move_list);
+    // } else if (!w and  ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black,  true,  true, false, false,  true), pos, move_list);
+    // } else if (!w and  ep and  wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(black,  true,  true, false, false, false), pos, move_list);
+    // } else if (!w and  ep and !wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black,  true, false,  true,  true,  true), pos, move_list);
+    // } else if (!w and  ep and !wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black,  true, false,  true,  true, false), pos, move_list);
+    // } else if (!w and  ep and !wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(black,  true, false,  true, false,  true), pos, move_list);
+    // } else if (!w and  ep and !wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black,  true, false,  true, false, false), pos, move_list);
+    // } else if (!w and  ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black,  true, false, false,  true,  true), pos, move_list);
+    // } else if (!w and  ep and !wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(black,  true, false, false,  true, false), pos, move_list);
+    // } else if (!w and  ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black,  true, false, false, false,  true), pos, move_list);
+    // } else if (!w and  ep and !wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(black,  true, false, false, false, false), pos, move_list);
+    // } else if (!w and !ep and  wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black, false,  true,  true,  true,  true), pos, move_list);
+    // } else if (!w and !ep and  wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black, false,  true,  true,  true, false), pos, move_list);
+    // } else if (!w and !ep and  wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(black, false,  true,  true, false,  true), pos, move_list);
+    // } else if (!w and !ep and  wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black, false,  true,  true, false, false), pos, move_list);
+    // } else if (!w and !ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black, false,  true, false,  true,  true), pos, move_list);
+    // } else if (!w and !ep and  wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(black, false,  true, false,  true, false), pos, move_list);
+    // } else if (!w and !ep and  wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black, false,  true, false, false,  true), pos, move_list);
+    // } else if (!w and !ep and  wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(black, false,  true, false, false, false), pos, move_list);
+    // } else if (!w and !ep and !wk and  wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black, false, false,  true,  true,  true), pos, move_list);
+    // } else if (!w and !ep and !wk and  wq and  bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black, false, false,  true,  true, false), pos, move_list);
+    // } else if (!w and !ep and !wk and  wq and  bk and  bq) { 
+    //     try generate_moves(BoardRights.new(black, false, false,  true, false,  true), pos, move_list);
+    // } else if (!w and !ep and !wk and  wq and !bk and !bq) { 
+    //     try generate_moves(BoardRights.new(black, false, false,  true, false, false), pos, move_list);
+    // } else if (!w and !ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black, false, false, false,  true,  true), pos, move_list);
+    // } else if (!w and !ep and !wk and !wq and  bk and !bq) {
+    //     try generate_moves(BoardRights.new(black, false, false, false,  true, false), pos, move_list);
+    // } else if (!w and !ep and !wk and !wq and  bk and  bq) {
+    //     try generate_moves(BoardRights.new(black, false, false, false, false,  true), pos, move_list);
+    // } else if (!w and !ep and !wk and !wq and !bk and !bq) {
+    //     try generate_moves(BoardRights.new(black, false, false, false, false, false), pos, move_list);
+    // }
+    // zig fmt: on
+}
 
 test "generate pinmask" {
     const expectEqual = std.testing.expectEqual;

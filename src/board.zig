@@ -1,9 +1,13 @@
 //! Defines the state of a chess board including a FEN parser 
 const std = @import("std");
+const ArrayList = std.ArrayList;
+
 const bitboard = @import("bitboard.zig");
 const Bitboard = bitboard.Bitboard;
 const bitops = @import("bitops.zig");
-// const movegen = @import("movegen.zig");
+
+const generate_moves_entry = @import("movegen.zig").generate_moves_entry;
+
 const zobrist = @import("zobrist.zig");
 // const Move = movegen.Move;
 // const MoveType = movegen.MoveType;
@@ -38,24 +42,74 @@ pub const Move = struct {
     from: Bitboard,
     to: Bitboard,
     move_type: MoveType,
+
+    const Self = @This();
+
+    /// Caller owns returned memory
+    pub fn to_str(self: Self, allocator: *const std.mem.Allocator) ![]const u8 {
+        // Promotions need 5 bytes
+        switch (self.move_type) {
+            MoveType.promote => |promote_to| {
+                var str = try allocator.alloc(u8, 5);
+                std.mem.copy(u8, str[0..2], bitboard.get_lsb_square(self.from).to_str());
+                std.mem.copy(u8, str[2..4], bitboard.get_lsb_square(self.to).to_str());
+                switch (promote_to) {
+                    PieceType.knight => str[4] = 'n',
+                    PieceType.bishop => str[4] = 'b',
+                    PieceType.rook => str[4] = 'r',
+                    PieceType.queen => str[4] = 'q',
+                    else => unreachable,
+                }
+                return str;
+            },
+            else => {
+                var str = try allocator.alloc(u8, 4);
+                std.mem.copy(u8, str[0..2], bitboard.get_lsb_square(self.from).to_str());
+                std.mem.copy(u8, str[2..4], bitboard.get_lsb_square(self.to).to_str());
+                return str;
+            },
+        }
+    }
+
+    const MoveParseError = error{
+        IllegalMove,
+    };
+
+    pub fn from_str(str: []const u8, allocator: *const std.mem.Allocator, pos: Position, board_rights: BoardRights) !Self {
+        const from = Square.from_str(str[0..2]);
+        const to = Square.from_str(str[2..4]);
+
+        var move_list = ArrayList(Move).init(allocator.*);
+        defer move_list.deinit();
+
+        try generate_moves_entry(board_rights, pos, &move_list);
+        for (move_list.items) |move| {
+            if (bitboard.get_lsb_square(move.from) == from and
+                bitboard.get_lsb_square(move.to) == to)
+            {
+                return move;
+            }
+        }
+        return MoveParseError.IllegalMove;
+    }
 };
 
-const WHITE_QUEENSIDE = CastleSwaps{
+pub const WHITE_QUEENSIDE = CastleSwaps{
     .king = 0x1400000000000000,
     .rook = 0x900000000000000,
 };
 
-const WHITE_KINGSIDE = CastleSwaps{
+pub const WHITE_KINGSIDE = CastleSwaps{
     .king = 0x5000000000000000,
     .rook = 0xa000000000000000,
 };
 
-const BLACK_KINGSIDE = CastleSwaps{
+pub const BLACK_KINGSIDE = CastleSwaps{
     .king = 0x50,
     .rook = 0xa0,
 };
 
-const BLACK_QUEENSIDE = CastleSwaps{
+pub const BLACK_QUEENSIDE = CastleSwaps{
     .king = 0x14,
     .rook = 0x9,
 };
@@ -150,7 +204,8 @@ pub const PieceType = enum(u3) {
 
 pub const BoardRights = struct {
     active_color: Color,
-    ep_square: ?Square,
+    /// whether or not en passant is currently possible (rare)
+    en_passant: bool,
     white_kingside: bool,
     white_queenside: bool,
     black_kingside: bool,
@@ -158,10 +213,10 @@ pub const BoardRights = struct {
 
     const Self = @This();
 
-    pub fn new(color: Color, ep_square: ?Square, wk: bool, wq: bool, bk: bool, bq: bool) Self {
+    pub fn new(color: Color, ep: bool, wk: bool, wq: bool, bk: bool, bq: bool) Self {
         return Self{
             .active_color = color,
-            .ep_square = ep_square,
+            .en_passant = ep,
             .white_kingside = wk,
             .white_queenside = wq,
             .black_kingside = bk,
@@ -170,7 +225,7 @@ pub const BoardRights = struct {
     }
 
     pub fn initial() Self {
-        return Self.new(Color.white, null, true, true, true, true);
+        return Self.new(Color.white, false, true, true, true, true);
     }
 
     pub fn kingside(self: *const Self, comptime color: Color) bool {
@@ -185,6 +240,54 @@ pub const BoardRights = struct {
             Color.white => return self.white_queenside,
             Color.black => return self.black_queenside,
         }
+    }
+
+    pub fn from_fen(fen: []const u8) FenParseError!Self {
+        var parts = std.mem.split(u8, fen, " ");
+        _ = parts.next().?; // position string
+
+        const active_color_fen = parts.next().?;
+        var active_color: Color = undefined;
+        if (std.mem.eql(u8, active_color_fen, "w")) {
+            active_color = Color.white;
+        } else if (std.mem.eql(u8, active_color_fen, "b")) {
+            active_color = Color.black;
+        } else {
+            return FenParseError.InvalidActiveColor;
+        }
+
+        const castling_fen = parts.next().?;
+        var white_kingside = false;
+        var white_queenside = false;
+        var black_kingside = false;
+        var black_queenside = false;
+
+        for (castling_fen) |c| {
+            switch (c) {
+                'K' => white_kingside = true,
+                'Q' => white_queenside = true,
+                'k' => black_kingside = true,
+                'q' => black_queenside = true,
+                '-' => break,
+                else => return FenParseError.InvalidCastlingRights,
+            }
+        }
+
+        const en_passant_fen = parts.next().?;
+        const en_passant = !std.mem.eql(u8, en_passant_fen, "-");
+        // var en_passant_square: ?Square = null;
+        // if (!std.mem.eql(u8, en_passant_fen, "-")) {
+        //     en_passant_square = Square.from_str(en_passant_fen);
+        // }
+
+        return Self{
+            .active_color = active_color,
+            .en_passant = en_passant,
+            .white_kingside = white_kingside,
+            .white_queenside = white_queenside,
+            .black_kingside = black_kingside,
+            .black_queenside = black_queenside,
+        };
     }
 
     pub fn print(self: *const Self, writer: anytype) !void {
@@ -209,6 +312,10 @@ pub const BoardRights = struct {
             _ = try writer.write("No en passant possible\n");
         }
     }
+
+    pub fn silent_move(self: *Self) Self {
+        return Self(self.active_color.other(), self.ep_square, self.white_kingside, self.white_queenside, self.black_kingside, self.black_queenside);
+    }
 };
 
 pub const Color = enum(u1) {
@@ -226,7 +333,7 @@ pub const Color = enum(u1) {
 const FenParseError = error{
     MissingField,
     InvalidPosition,
-    InvalidActiveSide,
+    InvalidActiveColor,
     InvalidCastlingRights,
     InvalidEnPassant,
     InvalidHalfMoveCounter,

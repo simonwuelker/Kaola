@@ -1,7 +1,10 @@
 //! Implements the Universal chess interface
 const std = @import("std");
-const Move = @import("movegen.zig").Move;
-const Board = @import("board.zig").Board;
+const board = @import("board.zig");
+const Position = board.Position;
+const BoardRights = board.BoardRights;
+const Move = board.Move;
+
 const UCI_COMMAND_MAX_LENGTH = 1024;
 
 /// Note that these are not all uci commands, just the ones
@@ -37,7 +40,10 @@ pub const GuiCommand = union(GuiCommandTag) {
     stop,
     eval,
     board,
-    position: Board,
+    position: struct {
+        position: Position,
+        board_rights: BoardRights,
+    },
     debug: bool,
 };
 
@@ -58,7 +64,7 @@ pub fn send_command(command: EngineCommand) !void {
     }
 }
 
-pub fn next_command() !GuiCommand {
+pub fn next_command(allocator: *const std.mem.Allocator) !GuiCommand {
     var buffer = [1]u8{0} ** UCI_COMMAND_MAX_LENGTH;
     const stdin = std.io.getStdIn().reader();
 
@@ -88,24 +94,25 @@ pub fn next_command() !GuiCommand {
         } else if (std.mem.eql(u8, command, "stop")) {
             return GuiCommand.stop;
         } else if (std.mem.eql(u8, command, "position")) {
-            const pos = if (std.mem.indexOf(u8, input, "moves")) |index| poswithmoves: {
+            const position_arg = if (std.mem.indexOf(u8, input, "moves")) |index| poswithmoves: {
                 break :poswithmoves std.mem.trim(u8, input[command.len..index], " ");
             } else poswithoutmoves: {
                 break :poswithoutmoves std.mem.trim(u8, input[command.len..], " ");
             };
-            const fen = if (std.mem.eql(u8, pos, "startpos")) default: {
+            const fen = if (std.mem.eql(u8, position_arg, "startpos")) default: {
                 break :default "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
             } else fen: {
-                break :fen pos;
+                break :fen position_arg;
             };
-            var board = Board.from_fen(fen) catch continue :get_command;
+            var position = Position.from_fen(fen) catch continue :get_command;
+            var board_rights = BoardRights.from_fen(fen) catch continue :get_command;
             if (std.mem.eql(u8, parts.next().?, "moves")) {
                 while (parts.next()) |move_str| {
-                    const move = Move.from_str(move_str, board) catch continue :get_command;
-                    board.apply(move);
+                    const move = Move.from_str(move_str, allocator, position, board_rights) catch continue :get_command;
+                    position = position.make_move(board_rights.active_color, move);
                 }
             }
-            return GuiCommand{ .position = board };
+            return GuiCommand{ .position = .{ position, board_rights } };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {
