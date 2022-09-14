@@ -6,6 +6,7 @@ const bitboard = @import("bitboard.zig");
 const board = @import("board.zig");
 const Position = board.Position;
 const BoardRights = board.BoardRights;
+const Color = board.Color;
 
 const movegen = @import("movegen.zig");
 const searcher = @import("searcher.zig");
@@ -29,17 +30,19 @@ pub fn main() !void {
     defer std.debug.assert(!general_purpose_allocator.deinit());
     const gpa = general_purpose_allocator.allocator();
 
-    var position: Position = undefined;
-    var board_rights: BoardRights = undefined;
+    // will probably be overwritten by "ucinewgame" but it prevents undefined behaviour
+    // and eases debugging to just define a default position
+    var position = Position.starting_position();
+    var board_rights = BoardRights.initial();
     mainloop: while (true) {
         const command = try uci.next_command(&gpa);
         try switch (command) {
             GuiCommand.uci => {
-                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Mephisto" } });
-                try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } });
-                try send_command(EngineCommand.uciok);
+                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Mephisto" } }, &gpa);
+                try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } }, &gpa);
+                try send_command(EngineCommand.uciok, &gpa);
             },
-            GuiCommand.isready => send_command(EngineCommand.readyok),
+            GuiCommand.isready => send_command(EngineCommand.readyok, &gpa),
             GuiCommand.debug => {},
             GuiCommand.newgame => {
                 position = Position.starting_position();
@@ -55,7 +58,12 @@ pub fn main() !void {
             },
             GuiCommand.stop => {},
             GuiCommand.board => position.print(),
-            GuiCommand.eval => std.debug.print("{d}\n", .{pesto.evaluate(position)}),
+            GuiCommand.eval => {
+                switch (board_rights.active_color) {
+                    Color.white => std.debug.print("{d}\n", .{pesto.evaluate(Color.white, position)}),
+                    Color.black => std.debug.print("{d}\n", .{pesto.evaluate(Color.black, position)}),
+                }
+            },
             GuiCommand.quit => break :mainloop,
         };
     }

@@ -430,6 +430,13 @@ pub const Position = struct {
         }
     }
 
+    pub fn as_array(self: *const Self) [2][6]Bitboard {
+        return [2][6]Bitboard {
+            [6]Bitboard { self.white_pawns, self.white_knights, self.white_bishops, self.white_rooks, self.white_queens, self.white_king },
+            [6]Bitboard { self.black_pawns, self.black_knights, self.black_bishops, self.black_rooks, self.black_queens, self.black_king },
+        };
+    }
+
     /// Create a new board with the starting position
     pub fn starting_position() Self {
         return Self.from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR") catch unreachable;
@@ -594,19 +601,19 @@ pub const Position = struct {
             Color.black => {
                 switch (move.move_type) {
                     MoveTag.castle => |swaps| {
-                        return Self(wp, wn, wb, wr, wq, wk, bp, bn, bb, br ^ swaps.rook, bq, bk ^ swaps.king);
+                        return Self.new(wp, wn, wb, wr, wq, wk, bp, bn, bb, br ^ swaps.rook, bq, bk ^ swaps.king);
                     },
                     MoveTag.double_push => {
-                        return Self(wp, wn, wb, wr, wq, wk, bp ^ (from | to), bn, bb, br, bq, bk);
+                        return Self.new(wp, wn, wb, wr, wq, wk, bp ^ (from | to), bn, bb, br, bq, bk);
                     },
                     MoveTag.promote => |promote_to| {
                         const r = ~from;
                         switch (promote_to) {
                             // zig fmt: off
-                            PieceType.queen  => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br, bq ^ to, bk),
-                            PieceType.rook   => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br ^ to, bq, bk),
-                            PieceType.bishop => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb ^ to, br, bq, bk),
-                            PieceType.knight => return Self(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn ^ to, bb, br, bq, bk),
+                            PieceType.queen  => return Self.new(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br, bq ^ to, bk),
+                            PieceType.rook   => return Self.new(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br ^ to, bq, bk),
+                            PieceType.bishop => return Self.new(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb ^ to, br, bq, bk),
+                            PieceType.knight => return Self.new(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn ^ to, bb, br, bq, bk),
                             else => unreachable,
                             // zig fmt: on
                         }

@@ -3,6 +3,7 @@ const std = @import("std");
 const board = @import("board.zig");
 const Position = board.Position;
 const BoardRights = board.BoardRights;
+const Color = board.Color;
 const Move = board.Move;
 
 const UCI_COMMAND_MAX_LENGTH = 1024;
@@ -54,13 +55,13 @@ pub const EngineCommand = union(EngineCommandTag) {
     bestmove: Move,
 };
 
-pub fn send_command(command: EngineCommand) !void {
+pub fn send_command(command: EngineCommand, allocator: *const std.mem.Allocator) !void {
     const stdout = std.io.getStdOut().writer();
     switch (command) {
         EngineCommandTag.uciok => _ = try stdout.write("uciok\n"),
         EngineCommandTag.id => |keyvalue| _ = try std.fmt.format(stdout, "id {s} {s}\n", keyvalue),
         EngineCommandTag.readyok => _ = try stdout.write("readyok\n"),
-        EngineCommandTag.bestmove => |move| _ = try std.fmt.format(stdout, "bestmove {s}\n", .{move.to_str()}),
+        EngineCommandTag.bestmove => |move| _ = try std.fmt.format(stdout, "bestmove {s}\n", .{move.to_str(allocator)}),
     }
 }
 
@@ -109,10 +110,17 @@ pub fn next_command(allocator: *const std.mem.Allocator) !GuiCommand {
             if (std.mem.eql(u8, parts.next().?, "moves")) {
                 while (parts.next()) |move_str| {
                     const move = Move.from_str(move_str, allocator, position, board_rights) catch continue :get_command;
-                    position = position.make_move(board_rights.active_color, move);
+                    switch (board_rights.active_color) {
+                        Color.white => {
+                            position = position.make_move(Color.white, move);
+                        },
+                        Color.black => {
+                            position = position.make_move(Color.black, move);
+                        },
+                    }
                 }
             }
-            return GuiCommand{ .position = .{ position, board_rights } };
+            return GuiCommand{ .position = .{ .position = position, .board_rights = board_rights } };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {

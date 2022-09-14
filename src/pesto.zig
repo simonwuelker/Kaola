@@ -1,6 +1,10 @@
 /// Evaluates a board position using the evaluation function from PeSTO
 /// https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function
 const board = @import("board.zig");
+const Position = board.Position;
+const Color = board.Color;
+const pop_ls1b = @import("bitops.zig").pop_ls1b;
+const get_lsb_square = @import("bitboard.zig").get_lsb_square;
 
 inline fn flip(square: u7) u6 {
     return @truncate(u6, square) ^ 56;
@@ -150,39 +154,44 @@ const ENDGAME_TABLE = [6][64]i16{
     ENDGAME_KING_TABLE,
 };
 
-const GAMEPHASE_INCREMENT = [12]u8{ 0, 0, 1, 1, 1, 1, 2, 2, 4, 4, 0, 0 };
+const GAMEPHASE_INCREMENT = [6]u8{ 0, 1, 1, 2, 4, 0};
 
-var midgame_table: [12][64]i16 = undefined;
-var endgame_table: [12][64]i16 = undefined;
+var midgame_table: [2][6][64]i16 = undefined;
+var endgame_table: [2][6][64]i16 = undefined;
 
 pub fn init_tables() void {
     var piece: u5 = 0;
     while (piece < 6) : (piece += 2) {
         var square: u7 = 0;
         while (square < 64) : (square += 1) {
-            midgame_table[2 * piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][square];
-            endgame_table[2 * piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][square];
-            midgame_table[2 * piece + 1][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][flip(square)];
-            endgame_table[2 * piece + 1][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][flip(square)];
+            midgame_table[0][piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][square];
+            endgame_table[0][piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][square];
+            midgame_table[1][piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][flip(square)];
+            endgame_table[1][piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][flip(square)];
         }
     }
 }
 
-pub fn evaluate(game: board.Board) i16 {
-    const us = @enumToInt(game.active_color);
-    const them = @enumToInt(game.active_color.other());
+pub fn evaluate(comptime active_color: Color, position: Position) i16 {
+    const us = @enumToInt(active_color);
+    const them = @enumToInt(active_color.other());
 
     var midgame = [2]i16{ 0, 0 };
     var endgame = [2]i16{ 0, 0 };
     var gamephase: u8 = 0;
 
-    var square: u7 = 0;
-    while (square < 64) : (square += 1) {
-        if (game.pieces[square]) |piece| {
-            const color = @enumToInt(piece.color());
-            midgame[color] += midgame_table[@enumToInt(piece)][square];
-            endgame[color] += endgame_table[@enumToInt(piece)][square];
-            gamephase += GAMEPHASE_INCREMENT[@enumToInt(piece)];
+    const pieces = position.as_array();
+    var piece: u3 = 0;
+    while(piece < 6): (piece += 1) {
+        var color: u2 = 0;
+        while (color < 2): (color += 1) {
+            var existing_pieces = pieces[color][piece];
+            while (existing_pieces != 0): (pop_ls1b(&existing_pieces)) {
+                const square = @enumToInt(get_lsb_square(existing_pieces));
+                midgame[color] += midgame_table[color][piece][square];
+                endgame[color] += endgame_table[color][piece][square];
+                gamephase += GAMEPHASE_INCREMENT[piece];
+            }
         }
     }
 
@@ -193,4 +202,11 @@ pub fn evaluate(game: board.Board) i16 {
     const endgamescore = endgame[us] - endgame[them];
 
     return @divTrunc(midgamescore * midgamephase + endgamescore * endgamephase, 24);
+}
+
+test "starting position is equal" {
+    const expectEqual = @import("std").testing.expectEqual;
+
+    const position = Position.starting_position();
+    try expectEqual(@as(i16, 0), evaluate(Color.white, position));
 }
