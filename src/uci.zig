@@ -105,10 +105,12 @@ pub fn next_command(allocator: *const std.mem.Allocator) !GuiCommand {
             } else fen: {
                 break :fen position_arg;
             };
-            var position = Position.from_fen(fen) catch continue :get_command;
-            var board_rights = BoardRights.from_fen(fen) catch continue :get_command;
+            const seperator = std.mem.indexOf(u8, fen, " ").?;
+            var position = Position.from_fen(fen[0..seperator]) catch continue :get_command;
+            var board_rights = BoardRights.from_fen(fen[seperator + 1..fen.len]) catch continue :get_command;
             if (std.mem.eql(u8, parts.next().?, "moves")) {
                 while (parts.next()) |move_str| {
+                    std.debug.print("making move {s}\n", .{move_str});
                     const move = Move.from_str(move_str, allocator, position, board_rights) catch continue :get_command;
                     switch (board_rights.active_color) {
                         Color.white => {

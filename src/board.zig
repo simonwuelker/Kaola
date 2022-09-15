@@ -242,9 +242,8 @@ pub const BoardRights = struct {
         }
     }
 
-    pub fn from_fen(fen: []const u8) FenParseError!Self {
-        var parts = std.mem.split(u8, fen, " ");
-        _ = parts.next().?; // position string
+    pub fn from_fen(fen_rights: []const u8) FenParseError!Self {
+        var parts = std.mem.split(u8, fen_rights, " ");
 
         const active_color_fen = parts.next().?;
         var active_color: Color = undefined;
