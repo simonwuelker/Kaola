@@ -12,5 +12,4 @@
 | [`searcher.zig`](https://github.com/Wuelle/zigchess/blob/main/src/searcher.zig) | Searches a position for the best move |
 | [`uci.zig`](https://github.com/Wuelle/zigchess/blob/main/src/uci.zig) | Implements the [Universal Chess Interface](https://en.wikipedia.org/wiki/Universal_Chess_Interface) |
 | [`zobrist.zig`](https://github.com/Wuelle/zigchess/blob/main/src/zobrist.zig) | Hashing function for chess board states |
-| [`parser.zig`](https://github.com/Wuelle/zigchess/blob/main/src/parser.zig) | Generic parser combinators for parsing FEN Strings and commandline arguments. Draws heavy inspiration from [Zig parser combinators and why they're awesome](https://devlog.hexops.com/2021/zig-parser-combinators-and-why-theyre-awesome/)|
 

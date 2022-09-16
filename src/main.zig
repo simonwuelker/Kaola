@@ -17,16 +17,6 @@ const GuiCommand = uci.GuiCommand;
 const EngineCommand = uci.EngineCommand;
 const send_command = uci.send_command;
 
-const parser = @import("parser.zig");
-const Literal = parser.Literal;
-const OneOf = parser.OneOf;
-const All = parser.All;
-const Parser = parser.Parser;
-
-const CommandLineArguments = @import("cli.zig").CommandLineArguments;
-
-const fixedBufferStream = std.io.fixedBufferStream;
-
 pub fn init() void {
     // bitboard.init_magic_numbers();
     bitboard.init_slider_attacks();
@@ -41,73 +31,43 @@ pub fn main() !void {
     defer std.debug.assert(!gpa.deinit());
     var allocator = gpa.allocator();
 
-    const a = try CommandLineArguments.parse(allocator);
-    _ = a;
-
-    // var reader = fixedBufferStream("-v");
-    // const Reader = @TypeOf(reader);
-
-    // const y = All([]const u8, Reader).init(comptime &.{ &Literal(Reader).init("-").parser, &Literal(Reader).init("v").parser }).parser;
-    // _ = y;
-
-    // const combinator = OneOf([]const u8, Reader).init(comptime &.{
-    //     &All([]const u8, Reader).init(&.{ &Literal(Reader).init("-").parser, &Literal(Reader).init("v").parser }).parser,
-    //     &All([]const u8, Reader).init(&.{ &Literal(Reader).init("--").parser, &Literal(Reader).init("version").parser }).parser,
-    // });
-
-    // var one_of = x("abc", @TypeOf(reader));
-    // _ = one_of;
-
-    // var p = &combinator.parser;
-    // var result = try p.parse(allocator, &reader);
-    // try std.testing.expectEqualStrings("sheep", result.?);
-    // if (result) |r| {
-    //         allocator.free(r);
-    // }
-    // _ = combinator;
-    _ = allocator;
-
-
-
-
-
     // will probably be overwritten by "ucinewgame" but it prevents undefined behaviour
     // and eases debugging to just define a default position
-    // var position = Position.starting_position();
-    // var board_rights = BoardRights.initial();
-    // mainloop: while (true) {
-    //     const command = try uci.next_command(&gpa);
-    //     try switch (command) {
-    //         GuiCommand.uci => {
-    //             try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Mephisto" } }, &gpa);
-    //             try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } }, &gpa);
-    //             try send_command(EngineCommand.uciok, &gpa);
-    //         },
-    //         GuiCommand.isready => send_command(EngineCommand.readyok, &gpa),
-    //         GuiCommand.debug => {},
-    //         GuiCommand.newgame => {
-    //             position = Position.starting_position();
-    //             board_rights = BoardRights.initial();
-    //         },
-    //         GuiCommand.position => |state| {
-    //             position = state.position;
-    //             board_rights = state.board_rights;
-    //         },
-    //         GuiCommand.go => {
-    //             // const best_move = searcher.search(game, 3);
-    //             // try send_command(EngineCommand{ .bestmove = best_move });
-    //         },
-    //         GuiCommand.stop => {},
-    //         GuiCommand.board => position.print(),
-    //         GuiCommand.eval => {
-    //             switch (board_rights.active_color) {
-    //                 Color.white => std.debug.print("{d}\n", .{pesto.evaluate(Color.white, position)}),
-    //                 Color.black => std.debug.print("{d}\n", .{pesto.evaluate(Color.black, position)}),
-    //             }
-    //         },
-    //         GuiCommand.quit => break :mainloop,
-    //     };
-    // }
+    var position = Position.starting_position();
+    var board_rights = BoardRights.initial();
+    mainloop: while (true) {
+        const command = try uci.next_command(allocator);
+        try switch (command) {
+            GuiCommand.uci => {
+                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Mephisto" } }, allocator);
+                try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } }, allocator);
+                try send_command(EngineCommand.uciok, allocator);
+            },
+            GuiCommand.isready => send_command(EngineCommand.readyok, allocator),
+            GuiCommand.debug => {},
+            GuiCommand.newgame => {
+                position = Position.starting_position();
+                board_rights = BoardRights.initial();
+            },
+            GuiCommand.position => |state| {
+                position = state.position;
+                board_rights = state.board_rights;
+            },
+            GuiCommand.go => {
+                // const best_move = searcher.search(game, 3);
+                // try send_command(EngineCommand{ .bestmove = best_move });
+            },
+            GuiCommand.stop => {},
+            GuiCommand.board => position.print(),
+            GuiCommand.eval => {
+                switch (board_rights.active_color) {
+                    Color.white => std.debug.print("{d}\n", .{pesto.evaluate(Color.white, position)}),
+                    Color.black => std.debug.print("{d}\n", .{pesto.evaluate(Color.black, position)}),
+                }
+            },
+            GuiCommand.quit => break :mainloop,
+        };
+    }
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {

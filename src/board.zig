@@ -1,6 +1,7 @@
 //! Defines the state of a chess board including a FEN parser 
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
 
 const bitboard = @import("bitboard.zig");
 const Bitboard = bitboard.Bitboard;
@@ -9,8 +10,6 @@ const bitops = @import("bitops.zig");
 const generate_moves_entry = @import("movegen.zig").generate_moves_entry;
 
 const zobrist = @import("zobrist.zig");
-// const Move = movegen.Move;
-// const MoveType = movegen.MoveType;
 
 fn bool_to_str(val: bool) []const u8 {
     if (val) {
@@ -46,7 +45,7 @@ pub const Move = struct {
     const Self = @This();
 
     /// Caller owns returned memory
-    pub fn to_str(self: Self, allocator: *const std.mem.Allocator) ![]const u8 {
+    pub fn to_str(self: Self, allocator: Allocator) ![]const u8 {
         // Promotions need 5 bytes
         switch (self.move_type) {
             MoveType.promote => |promote_to| {
@@ -75,15 +74,17 @@ pub const Move = struct {
         IllegalMove,
     };
 
-    pub fn from_str(str: []const u8, allocator: *const std.mem.Allocator, pos: Position, board_rights: BoardRights) !Self {
+    pub fn from_str(str: []const u8, allocator: Allocator, pos: Position, board_rights: BoardRights) !Self {
         const from = Square.from_str(str[0..2]);
         const to = Square.from_str(str[2..4]);
 
-        var move_list = ArrayList(Move).init(allocator.*);
+        var move_list = ArrayList(Move).init(allocator);
         defer move_list.deinit();
 
         try generate_moves_entry(board_rights, pos, &move_list);
         for (move_list.items) |move| {
+            const move_name = try move.to_str(allocator);
+            allocator.free(move_name);
             if (bitboard.get_lsb_square(move.from) == from and
                 bitboard.get_lsb_square(move.to) == to)
             {
@@ -180,6 +181,14 @@ pub const Square = enum(u6) {
     pub inline fn down_right(self: *const Square) Square {
         return @intToEnum(Square, @enumToInt(self.*) + 9);
     }
+
+    pub inline fn up_left(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) - 9);
+    }
+
+    pub inline fn up_right(self: *const Square) Square {
+        return @intToEnum(Square, @enumToInt(self.*) - 7);
+    }
 };
 
 const SQUARE_NAME = [64][:0]const u8{
@@ -240,6 +249,14 @@ pub const BoardRights = struct {
             Color.white => return self.white_queenside,
             Color.black => return self.black_queenside,
         }
+    }
+
+    pub fn register_move(self: *Self, move: Move) void {
+        // dont do much for now
+        // TODO: update castling and en passant rights
+        _ = move;
+        self.active_color = self.active_color.other();
+
     }
 
     pub fn from_fen(fen_rights: []const u8) FenParseError!Self {
