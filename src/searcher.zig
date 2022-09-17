@@ -1,55 +1,98 @@
 //! (For now) a very primitive search
-const Board = @import("board.zig").Board;
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+
 const Color = @import("board.zig").Color;
 const movegen = @import("movegen.zig");
+const generate_moves = movegen.generate_moves;
 const pesto = @import("pesto.zig");
-const Move = movegen.Move;
 
-var moves: [64]Move = undefined;
-var num_moves: u8 = undefined;
+const board = @import("board.zig");
+const GameState = board.GameState;
+const Move = board.Move;
 
-// ultimately, i want to do the alpha-beta search *in here*
-// so we can evaluate moves *while* we generate them
-// and stop generation as soon as a branch is pruned
-fn callback(move: Move) void {
-    moves[num_moves] = move;
-    num_moves += 1;
+const MIN_SCORE = -1000;
+const MAX_SCORE = 1000;
+
+pub fn search(active_color: Color, state: GameState, depth: u8, allocator: Allocator) !Move {
+    switch (active_color) {
+        Color.white => return try alpha_beta_search(Color.white, state, depth, allocator),
+        Color.black => return try alpha_beta_search(Color.black, state, depth, allocator),
+    }
 }
 
-/// Determines the max score that can be reached in a given position
-fn max_score(board: Board, depth: u8) i16 {
-    if (depth == 0) return pesto.evaluate(board);
-    num_moves = 0;
-    var best_score: i16 = -100; // something low, idk
-    movegen.generate_moves(board, callback);
-    for (moves[0..num_moves]) |move| {
-        var modified = board;
-        modified.apply(move);
-        const score = max_score(modified, depth - 1);
-        best_score = @maximum(score, best_score);
+fn alpha_beta_search(comptime active_color: Color, state: GameState, depth: u8, allocator: Allocator) Allocator.Error!Move {
+    var move_list = ArrayList(Move).init(allocator);
+    defer move_list.deinit();
+
+    try generate_moves(active_color, state, &move_list);
+
+    var best_move: Move = undefined;
+    var best_score: i16 = MIN_SCORE;
+
+    for (move_list.items) |move_to_consider| {
+        const new_state = state.make_move(active_color, move_to_consider);
+        const new_color = comptime active_color.other();
+        const score = try max_value(new_color, new_state, depth - 1, allocator, MIN_SCORE, MAX_SCORE);
+
+        if (score > best_score) {
+            best_move = move_to_consider;
+            best_score = score;
+        }
     }
-    return best_score;
+    return best_move;
 }
 
-pub fn search(board: Board, depth: u8) Move {
-    num_moves = 0;
-    if (board.active_color == Color.white) {
-        movegen.generate_moves(Color.white, board, callback);
-    } else {
-        movegen.generate_moves(Color.black, board, callback);
+fn max_value(comptime active_color: Color, state: GameState, depth: u8, allocator: Allocator, alpha_: i16, beta_: i16) Allocator.Error!i16 {
+    if (depth == 0) {
+        return pesto.evaluate(active_color, state.position);
     }
-    _ = depth;
-    return moves[0];
-    // var best_move: Move = undefined;
-    // var best_score: i16 = -100;
-    // for (moves[0..num_moves]) |move| {
-    //     var modified = board;
-    //     modified.apply(move);
-    //     const score = max_score(modified, depth - 1);
-    //     if (best_score < score) {
-    //         best_move = move;
-    //         best_score = score;
-    //     }
-    // }
-    // return best_move;
+    var alpha: i16 = alpha_;
+    var beta: i16 = beta_;
+
+    var move_list = ArrayList(Move).init(allocator);
+    defer move_list.deinit();
+
+    var score: i16 = MIN_SCORE;
+    try generate_moves(active_color, state, &move_list);
+    for (move_list.items) |move_to_consider| {
+        const new_state = state.make_move(active_color, move_to_consider);
+        const new_color = comptime active_color.other();
+        score = @maximum(score, try min_value(new_color, new_state, depth - 1, allocator, alpha, beta));
+
+        if (score >= beta) {
+            return score;
+        }
+        alpha = @maximum(score, alpha);
+    }
+
+    return score;
+
+}
+
+fn min_value(comptime active_color: Color, state: GameState, depth: u8, allocator: Allocator, alpha_: i16, beta_: i16) Allocator.Error!i16 {
+    if (depth == 0) {
+        return pesto.evaluate(active_color, state.position);
+    }
+    var alpha: i16 = alpha_;
+    var beta: i16 = beta_;
+
+    var move_list = ArrayList(Move).init(allocator);
+    defer move_list.deinit();
+
+    var score: i16 = MAX_SCORE;
+    try generate_moves(active_color, state, &move_list);
+    for (move_list.items) |move_to_consider| {
+        const new_state = state.make_move(active_color, move_to_consider);
+        const new_color = comptime active_color.other();
+        score = @minimum(score, try max_value(new_color, new_state, depth - 1, allocator, alpha, beta));
+
+        if (score <= alpha) {
+            return score;
+        }
+        beta = @minimum(score, beta);
+    }
+
+    return score;
 }

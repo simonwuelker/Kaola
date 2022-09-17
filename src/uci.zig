@@ -2,6 +2,8 @@
 const std = @import("std");
 
 const board = @import("board.zig");
+const parse_fen = board.parse_fen;
+const GameState = board.GameState;
 const Position = board.Position;
 const BoardRights = board.BoardRights;
 const Color = board.Color;
@@ -12,6 +14,18 @@ const peekStream = std.io.peekStream;
 const Allocator = std.mem.Allocator;
 
 const UCI_COMMAND_MAX_LENGTH = 1024;
+
+fn u32_from_str(str: []const u8) u32 {
+    var x: u32 = 0;
+
+    for(str) |c| {
+        std.debug.assert('0' <= c);
+        std.debug.assert(c <= '9');
+        x += c - '0';
+        x *= 10;
+    }
+    return x;
+}
 
 /// Reads a block of non-whitespace characters and skips any number of following whitespaces
 pub fn read_word(comptime Reader: type, src: Reader) !?[]const u8 {
@@ -58,6 +72,7 @@ pub const GuiCommandTag = enum(u8) {
     // non-standard uci commands
     eval,
     board,
+    moves,
 };
 
 pub const EngineCommandTag = enum(u8) {
@@ -72,13 +87,26 @@ pub const GuiCommand = union(GuiCommandTag) {
     isready,
     quit,
     newgame,
-    go,
+    go: struct {
+        ponder: bool,
+        btime: ?u32,
+        wtime: ?u32,
+        binc: u32,
+        winc: u32,
+        depth: ?u32,
+        nodes: ?u32,
+        mate: ?u32,
+        movetime: ?u32,
+        movestogo: ?u32,
+        infinite: bool,
+    },
     stop,
     eval,
     board,
+    moves,
     position: struct {
-        position: Position,
-        board_rights: BoardRights,
+        active_color: Color,
+        state: GameState,
     },
     debug: bool,
 };
@@ -96,7 +124,11 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
         EngineCommandTag.uciok => _ = try stdout.write("uciok\n"),
         EngineCommandTag.id => |keyvalue| _ = try std.fmt.format(stdout, "id {s} {s}\n", keyvalue),
         EngineCommandTag.readyok => _ = try stdout.write("readyok\n"),
-        EngineCommandTag.bestmove => |move| _ = try std.fmt.format(stdout, "bestmove {s}\n", .{move.to_str(allocator)}),
+        EngineCommandTag.bestmove => |move| {
+            const move_name = try move.to_str(allocator);
+            _ = try std.fmt.format(stdout, "bestmove {s}\n", .{move_name});
+            allocator.free(move_name);
+        },
     }
 }
 
@@ -105,7 +137,7 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
     const stdin = std.io.getStdIn().reader();
     _ = allocator;
 
-    while (true) {
+    read_command: while (true) {
         const input = (try stdin.readUntilDelimiter(&buffer, '\n'));
         if (input.len == 0) continue;
 
@@ -130,21 +162,77 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
         } else if (std.mem.eql(u8, command, "ucinewgame")) {
             return GuiCommand.newgame;
         } else if (std.mem.eql(u8, command, "go")) {
-            return GuiCommand.go;
+            var ponder = false;
+            var btime: ?u32 = null;
+            var wtime: ?u32 = null;
+            var binc: u32 = 0;
+            var winc: u32 = 0;
+            var depth: ?u32 = null;
+            var nodes: ?u32 = null;
+            var mate: ?u32 = null;
+            var movetime: ?u32 = 0;
+            var movestogo: ?u32 = null;
+            var infinite: bool = false;
+
+            while (words.next()) |arg| {
+                // searchmoves
+
+                if (std.mem.eql(u8, arg, "searchmoves")) {
+                    unreachable; // unimplemented
+                } else if (std.mem.eql(u8, arg, "ponder")) {
+                    ponder = true;
+                } else if (std.mem.eql(u8, arg, "wtime")) {
+                    wtime = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "btime")) {
+                    btime = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "winc")) {
+                    winc = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "binc")) {
+                    binc = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "movestogo")) {
+                    movestogo = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "depth")) {
+                    depth = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "nodes")) {
+                    nodes = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "mate")) {
+                    mate = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "movetime")) {
+                    movetime = u32_from_str(words.next() orelse continue :read_command);
+                } else if (std.mem.eql(u8, arg, "infinite")) {
+                    infinite = true;
+                }
+            }
+
+            return GuiCommand{
+                .go = .{
+                    .ponder = ponder,
+                    .wtime = wtime,
+                    .btime = btime,
+                    .winc = winc,
+                    .binc = binc,
+                    .depth = depth,
+                    .nodes = nodes,
+                    .mate = mate,
+                    .movetime = movetime,
+                    .movestogo = movestogo,
+                    .infinite = infinite,
+                },
+            };
         } else if (std.mem.eql(u8, command, "stop")) {
             return GuiCommand.stop;
         } else if (std.mem.eql(u8, command, "position")) {
             const pos_variant = words.next().?;
-            var position: Position = undefined;
-            var board_rights: BoardRights = undefined;
+            var active_color: Color = undefined;
+            var state: GameState = undefined;
             var maybe_moves_str: ?[]const u8 = null;
             if (std.mem.eql(u8, pos_variant, "fen")) {
                 // this part gets a bit messy - we concatenate the rest of the uci line, then split it on "moves"
                 var parts = std.mem.split(u8, words.rest(), "moves");
                 const fen = std.mem.trim(u8, parts.next().?, " ");
-                const seperator = std.mem.indexOf(u8, fen, " ").?;
-                position = Position.from_fen(fen[0..seperator]) catch continue;
-                board_rights = BoardRights.from_fen(fen[seperator + 1..fen.len]) catch continue;
+                const result = try parse_fen(fen);
+                active_color = result.active_color;
+                state = result.state;
 
                 const remaining = parts.rest();
                 if (remaining.len != 0) {
@@ -152,8 +240,8 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
                 }
 
             } else if (std.mem.eql(u8, pos_variant, "startpos")) {
-                position = Position.starting_position();
-                board_rights = BoardRights.initial();
+                active_color = Color.white;
+                state = GameState.initial();
                 if (words.next()) |keyword| {
                     if (std.mem.eql(u8, keyword, "moves")) {
                         maybe_moves_str = words.rest();
@@ -164,25 +252,27 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             if (maybe_moves_str) |moves_str| {
                 var moves = std.mem.split(u8, std.mem.trim(u8, moves_str, " "), " ");
                 while (moves.next()) |move_str| {
-                    const move = try Move.from_str(move_str, allocator, position, board_rights);// catch continue :read_command;
-                    switch (board_rights.active_color) {
+                    const move = try Move.from_str(move_str, allocator, active_color, state);// catch continue :read_command;
+                    switch (active_color) {
                         Color.white => {
-                            position = position.make_move(Color.white, move);
+                            state = state.make_move(Color.white, move);
                         },
                         Color.black => {
-                            position = position.make_move(Color.black, move);
+                            state = state.make_move(Color.black, move);
                         },
                     }
-                    board_rights.register_move(move);
+                    active_color = active_color.other();
                 }
             }
-            return GuiCommand{ .position = .{ .position = position, .board_rights = board_rights } };
+            return GuiCommand{ .position = .{ .active_color = active_color, .state = state } };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {
             return GuiCommand.eval;
         } else if (std.mem.eql(u8, command, "board")) {
             return GuiCommand.board;
+        } else if (std.mem.eql(u8, command, "moves")) {
+            return GuiCommand.moves;
         }
 
         // ignore unknown commands

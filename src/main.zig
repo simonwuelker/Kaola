@@ -4,11 +4,12 @@ const ArrayList = std.ArrayList;
 const bitboard = @import("bitboard.zig");
 
 const board = @import("board.zig");
-const Position = board.Position;
-const BoardRights = board.BoardRights;
+const Move = board.Move;
+const GameState = board.GameState;
 const Color = board.Color;
 
-const movegen = @import("movegen.zig");
+const generate_moves = @import("movegen.zig").generate_moves;
+
 const searcher = @import("searcher.zig");
 const pesto = @import("pesto.zig");
 
@@ -27,14 +28,15 @@ pub fn init() void {
 
 pub fn main() !void {
     init();
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!gpa.deinit());
     var allocator = gpa.allocator();
 
     // will probably be overwritten by "ucinewgame" but it prevents undefined behaviour
-    // and eases debugging to just define a default position
-    var position = Position.starting_position();
-    var board_rights = BoardRights.initial();
+    // just define a default position
+    var active_color = Color.white;
+    var state = GameState.initial();
     mainloop: while (true) {
         const command = try uci.next_command(allocator);
         try switch (command) {
@@ -46,23 +48,39 @@ pub fn main() !void {
             GuiCommand.isready => send_command(EngineCommand.readyok, allocator),
             GuiCommand.debug => {},
             GuiCommand.newgame => {
-                position = Position.starting_position();
-                board_rights = BoardRights.initial();
+                active_color = Color.white;
+                state = GameState.initial();
             },
-            GuiCommand.position => |state| {
-                position = state.position;
-                board_rights = state.board_rights;
+            GuiCommand.position => |game| {
+                active_color = game.active_color;
+                state = game.state;
             },
             GuiCommand.go => {
-                // const best_move = searcher.search(game, 3);
-                // try send_command(EngineCommand{ .bestmove = best_move });
+                const best_move = try searcher.search(active_color, state, 3, allocator);
+                try send_command(EngineCommand{ .bestmove = best_move }, allocator);
             },
             GuiCommand.stop => {},
-            GuiCommand.board => position.print(),
+            GuiCommand.board => state.print(),
             GuiCommand.eval => {
-                switch (board_rights.active_color) {
-                    Color.white => std.debug.print("{d}\n", .{pesto.evaluate(Color.white, position)}),
-                    Color.black => std.debug.print("{d}\n", .{pesto.evaluate(Color.black, position)}),
+                switch (active_color) {
+                    Color.white => std.debug.print("{d}\n", .{pesto.evaluate(Color.white, state.position)}),
+                    Color.black => std.debug.print("{d}\n", .{pesto.evaluate(Color.black, state.position)}),
+                }
+            },
+            GuiCommand.moves => {
+                var move_list = ArrayList(Move).init(allocator);
+                defer move_list.deinit();
+
+                switch (active_color) {
+                    Color.white => try generate_moves(Color.white, state, &move_list),
+                    Color.black => try generate_moves(Color.black, state, &move_list),
+                }
+                
+
+                for (move_list.items) |move| {
+                    const move_name = try move.to_str(allocator);
+                    std.debug.print("{s}\n", .{move_name});
+                    allocator.free(move_name);
                 }
             },
             GuiCommand.quit => break :mainloop,

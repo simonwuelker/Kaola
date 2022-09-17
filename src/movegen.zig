@@ -4,8 +4,10 @@ const std = @import("std");
 const pop_ls1b = @import("bitops.zig").pop_ls1b;
 
 const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
 
 const board = @import("board.zig");
+const GameState = board.GameState;
 const Position = board.Position;
 const BoardRights = board.BoardRights;
 const Color = board.Color;
@@ -21,6 +23,7 @@ const pawn_attacks_left = bitboard.pawn_attacks_left;
 const pawn_attacks_right = bitboard.pawn_attacks_right;
 const rook_attacks = bitboard.rook_attacks;
 const get_lsb_square = bitboard.get_lsb_square;
+
 
 /// Bit mask for masking off the third rank
 const THIRD_RANK: Bitboard = 0x0000FF0000000000;
@@ -165,9 +168,9 @@ fn add_all(from: Bitboard, moves: Bitboard, list: *ArrayList(Move), move_type: M
 }
 
 // Caller owns returned memory
-pub fn generate_moves(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move)) !void {
-    const us = comptime board_rights.active_color;
+pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move)) Allocator.Error!void {
     const them = comptime us.other();
+    const pos = state.position;
     const king_unsafe_squares = pos.king_unsafe_squares(us);
     const diag_sliders = pos.bishops(us) | pos.queens(us);
     const straight_sliders = pos.rooks(us) | pos.queens(us);
@@ -260,19 +263,18 @@ pub fn generate_moves(comptime board_rights: BoardRights, pos: Position, move_li
     }
 
     // try pawn_moves(us, pos, move_list, checkmask, pinmask);
-    try castle(board_rights, pos, move_list, king_unsafe_squares);
-    try pawn_moves(board_rights, pos, move_list, checkmask, pinmask);
+    try castle(us, state, move_list, king_unsafe_squares);
+    try pawn_moves(us, state, move_list, checkmask, pinmask);
     return;
 }
 
-fn castle(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move), king_unsafe_squares: Bitboard) !void {
-    const us = comptime board_rights.active_color;
+fn castle(comptime us: Color, state: GameState, move_list: *ArrayList(Move), king_unsafe_squares: Bitboard) !void {
     // cannot castle either way when in check
-    if (pos.king(us) & king_unsafe_squares != 0) return;
+    if (state.position.king(us) & king_unsafe_squares != 0) return;
 
     // The squares we traverse must not be in check or occupied
-    const blockers = pos.occupied | king_unsafe_squares;
-    if (board_rights.queenside(us) and blockers & queenside_blockers(us) == 0) {
+    const blockers = state.position.occupied | king_unsafe_squares;
+    if (state.can_castle_queenside(us) and blockers & queenside_blockers(us) == 0) {
         switch (us) {
             Color.white => {
                 try move_list.append(Move{
@@ -291,7 +293,7 @@ fn castle(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayLi
         }
     }
 
-    if (board_rights.kingside(us) and blockers & kingside_blockers(us) == 0) {
+    if (state.can_castle_kingside(us) and blockers & kingside_blockers(us) == 0) {
         switch (us) {
             Color.white => {
                 try move_list.append(Move{
@@ -311,15 +313,14 @@ fn castle(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayLi
     }
 }
 
-fn pawn_moves(comptime board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move), checkmask: Bitboard, pinmask: Pinmask) !void {
+fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move), checkmask: Bitboard, pinmask: Pinmask) !void {
     // Terminology:
     // moving => move pawn one square
     // pushing => move pawn two squares
     // moving/pushing uses the straight pinmask, capturing the diagonal one (like a queen)
-    const us = comptime board_rights.active_color;
     const them = comptime us.other();
-    const empty = ~pos.occupied;
-    const our_pawns = pos.pawns(us);
+    const empty = ~state.position.occupied;
+    const our_pawns = state.position.pawns(us);
 
     // pawn moves
     var legal_pawn_moves: Bitboard = 0;
@@ -399,8 +400,8 @@ fn pawn_moves(comptime board_rights: BoardRights, pos: Position, move_list: *Arr
     right_captures |= pawn_attacks_right(us, diag_pinned_pawns) & pinmask.diagonal;
     right_captures |= pawn_attacks_right(us, unpinned_pawns);
 
-    left_captures &= pos.occupied_by(them);
-    right_captures &= pos.occupied_by(them);
+    left_captures &= state.position.occupied_by(them);
+    right_captures &= state.position.occupied_by(them);
     left_captures &= checkmask;
     right_captures &= checkmask;
 
@@ -445,156 +446,14 @@ fn pawn_moves(comptime board_rights: BoardRights, pos: Position, move_list: *Arr
     }
 }
 
-pub fn generate_moves_entry(board_rights: BoardRights, pos: Position, move_list: *ArrayList(Move)) !void {
-    const w = board_rights.active_color == Color.white;
-    const ep = board_rights.en_passant;
-    const wk = board_rights.white_kingside;
-    const wq = board_rights.white_queenside;
-    const bk = board_rights.black_kingside;
-    const bq = board_rights.black_queenside;
-    const white = Color.white;
-    const black = Color.black;
-
-    // zig fmt: off
-    if        ( w and  ep and  wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white,  true,  true,  true,  true,  true), pos, move_list);
-    } else if ( w and  ep and  wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white,  true,  true,  true,  true, false), pos, move_list);
-    } else if ( w and  ep and  wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(white,  true,  true,  true, false,  true), pos, move_list);
-    } else if ( w and  ep and  wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white,  true,  true,  true, false, false), pos, move_list);
-    } else if ( w and  ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white,  true,  true, false,  true,  true), pos, move_list);
-    } else if ( w and  ep and  wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white,  true,  true, false,  true, false), pos, move_list);
-    } else if ( w and  ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white,  true,  true, false, false,  true), pos, move_list);
-    } else if ( w and  ep and  wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white,  true,  true, false, false, false), pos, move_list);
-    } else if ( w and  ep and !wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white,  true, false,  true,  true,  true), pos, move_list);
-    } else if ( w and  ep and !wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white,  true, false,  true,  true, false), pos, move_list);
-    } else if ( w and  ep and !wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(white,  true, false,  true, false,  true), pos, move_list);
-    } else if ( w and  ep and !wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white,  true, false,  true, false, false), pos, move_list);
-    } else if ( w and  ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white,  true, false, false,  true,  true), pos, move_list);
-    } else if ( w and  ep and !wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white,  true, false, false,  true, false), pos, move_list);
-    } else if ( w and  ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white,  true, false, false, false,  true), pos, move_list);
-    } else if ( w and  ep and !wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white,  true, false, false, false, false), pos, move_list);
-    } else if ( w and !ep and  wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white, false,  true,  true,  true,  true), pos, move_list);
-    } else if ( w and !ep and  wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white, false,  true,  true,  true, false), pos, move_list);
-    } else if ( w and !ep and  wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(white, false,  true,  true, false,  true), pos, move_list);
-    } else if ( w and !ep and  wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white, false,  true,  true, false, false), pos, move_list);
-    } else if ( w and !ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white, false,  true, false,  true,  true), pos, move_list);
-    } else if ( w and !ep and  wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white, false,  true, false,  true, false), pos, move_list);
-    } else if ( w and !ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white, false,  true, false, false,  true), pos, move_list);
-    } else if ( w and !ep and  wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white, false,  true, false, false, false), pos, move_list);
-    } else if ( w and !ep and !wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white, false, false,  true,  true,  true), pos, move_list);
-    } else if ( w and !ep and !wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white, false, false,  true,  true, false), pos, move_list);
-    } else if ( w and !ep and !wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(white, false, false,  true, false,  true), pos, move_list);
-    } else if ( w and !ep and !wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(white, false, false,  true, false, false), pos, move_list);
-    } else if ( w and !ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white, false, false, false,  true,  true), pos, move_list);
-    } else if ( w and !ep and !wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white, false, false, false,  true, false), pos, move_list);
-    } else if ( w and !ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(white, false, false, false, false,  true), pos, move_list);
-    } else if ( w and !ep and !wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(white, false, false, false, false, false), pos, move_list);
-    } else if (!w and  ep and  wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black,  true,  true,  true,  true,  true), pos, move_list);
-    } else if (!w and  ep and  wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black,  true,  true,  true,  true, false), pos, move_list);
-    } else if (!w and  ep and  wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(black,  true,  true,  true, false,  true), pos, move_list);
-    } else if (!w and  ep and  wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black,  true,  true,  true, false, false), pos, move_list);
-    } else if (!w and  ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black,  true,  true, false,  true,  true), pos, move_list);
-    } else if (!w and  ep and  wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black,  true,  true, false,  true, false), pos, move_list);
-    } else if (!w and  ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black,  true,  true, false, false,  true), pos, move_list);
-    } else if (!w and  ep and  wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black,  true,  true, false, false, false), pos, move_list);
-    } else if (!w and  ep and !wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black,  true, false,  true,  true,  true), pos, move_list);
-    } else if (!w and  ep and !wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black,  true, false,  true,  true, false), pos, move_list);
-    } else if (!w and  ep and !wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(black,  true, false,  true, false,  true), pos, move_list);
-    } else if (!w and  ep and !wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black,  true, false,  true, false, false), pos, move_list);
-    } else if (!w and  ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black,  true, false, false,  true,  true), pos, move_list);
-    } else if (!w and  ep and !wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black,  true, false, false,  true, false), pos, move_list);
-    } else if (!w and  ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black,  true, false, false, false,  true), pos, move_list);
-    } else if (!w and  ep and !wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black,  true, false, false, false, false), pos, move_list);
-    } else if (!w and !ep and  wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black, false,  true,  true,  true,  true), pos, move_list);
-    } else if (!w and !ep and  wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black, false,  true,  true,  true, false), pos, move_list);
-    } else if (!w and !ep and  wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(black, false,  true,  true, false,  true), pos, move_list);
-    } else if (!w and !ep and  wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black, false,  true,  true, false, false), pos, move_list);
-    } else if (!w and !ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black, false,  true, false,  true,  true), pos, move_list);
-    } else if (!w and !ep and  wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black, false,  true, false,  true, false), pos, move_list);
-    } else if (!w and !ep and  wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black, false,  true, false, false,  true), pos, move_list);
-    } else if (!w and !ep and  wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black, false,  true, false, false, false), pos, move_list);
-    } else if (!w and !ep and !wk and  wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black, false, false,  true,  true,  true), pos, move_list);
-    } else if (!w and !ep and !wk and  wq and  bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black, false, false,  true,  true, false), pos, move_list);
-    } else if (!w and !ep and !wk and  wq and  bk and  bq) { 
-        try generate_moves(comptime BoardRights.new(black, false, false,  true, false,  true), pos, move_list);
-    } else if (!w and !ep and !wk and  wq and !bk and !bq) { 
-        try generate_moves(comptime BoardRights.new(black, false, false,  true, false, false), pos, move_list);
-    } else if (!w and !ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black, false, false, false,  true,  true), pos, move_list);
-    } else if (!w and !ep and !wk and !wq and  bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black, false, false, false,  true, false), pos, move_list);
-    } else if (!w and !ep and !wk and !wq and  bk and  bq) {
-        try generate_moves(comptime BoardRights.new(black, false, false, false, false,  true), pos, move_list);
-    } else if (!w and !ep and !wk and !wq and !bk and !bq) {
-        try generate_moves(comptime BoardRights.new(black, false, false, false, false, false), pos, move_list);
-    }
-    // zig fmt: on
-}
-
 test "generate pinmask" {
     const expectEqual = std.testing.expectEqual;
+    const parse_fen = board.parse_fen;
 
     // contains straight pins, diagonal pins and various setups
     // that look like pins, but actually aren't
-    const position = Position.from_fen("1b6/4P1P1/4r3/rP2K3/8/2P5/8/b7") catch unreachable;
-    const pins = generate_pinmask(Color.white, position);
+    const state = (try parse_fen("1b6/4P1P1/4r3/rP2K3/8/2P5/8/b7 w - - 0 1")).state;
+    const pins = generate_pinmask(Color.white, state.position);
 
     try expectEqual(@as(Bitboard, 0x10204080f000000), pins.both);
     try expectEqual(@as(Bitboard, 0xf000000), pins.straight);
@@ -603,16 +462,17 @@ test "generate pinmask" {
 
 test "checkmask generation" {
     const expectEqual = std.testing.expectEqual;
+    const parse_fen = board.parse_fen;
 
     // Simple check, only blocking/capturing the checking piece is allowed
-    const simple = try Position.from_fen("8/1q5b/8/5P2/4K3/8/8/8");
-    try expectEqual(@as(Bitboard, 0x8040200), generate_checkmask(Color.white, simple));
+    const simple = (try parse_fen("8/1q5b/8/5P2/4K3/8/8/8 w - - 0 1")).state;
+    try expectEqual(@as(Bitboard, 0x8040200), generate_checkmask(Color.white, simple.position));
 
     // Double check - no moves (except king moves) allowed
-    const double = try Position.from_fen("8/8/5q2/8/1p6/2K5/8/8");
-    try expectEqual(@as(Bitboard, 0), generate_checkmask(Color.white, double));
+    const double = (try parse_fen("8/8/5q2/8/1p6/2K5/8/8 w - - 0 1")).state;
+    try expectEqual(@as(Bitboard, 0), generate_checkmask(Color.white, double.position));
 
     // No check, all moves allowed
-    const no_check = try Position.from_fen("8/8/8/3K4/8/8/8/8");
-    try expectEqual(~@as(Bitboard, 0), generate_checkmask(Color.white, no_check));
+    const no_check = (try parse_fen("8/8/8/3K4/8/8/8/8 w - - 0 1")).state;
+    try expectEqual(~@as(Bitboard, 0), generate_checkmask(Color.white, no_check.position));
 }
