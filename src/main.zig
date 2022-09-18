@@ -1,5 +1,7 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const Level = std.log.Level;
+const Scope = std.log.default;
 
 const bitboard = @import("bitboard.zig");
 
@@ -18,16 +20,28 @@ const GuiCommand = uci.GuiCommand;
 const EngineCommand = uci.EngineCommand;
 const send_command = uci.send_command;
 
-pub fn init() void {
+const LOG_FILE = "/home/alaska/Downloads/zigchess/logs";
+
+pub fn init() !void {
+    std.fs.deleteFileAbsolute(LOG_FILE) catch {}; // if the file doesn't exist, thats fine
+    _ = try std.fs.createFileAbsolute(LOG_FILE, .{});
     // bitboard.init_magic_numbers();
     bitboard.init_slider_attacks();
     bitboard.init_paths_between_squares(); // depends on initialized slider attacks
     pesto.init_tables();
 }
 
+pub fn log(comptime message_level: Level, comptime scope: anytype, comptime format: []const u8, args: anytype) void {
+    _ = scope;
+    _ = message_level;
+    const file = std.fs.openFileAbsolute(LOG_FILE, .{.write = true}) catch unreachable;
+    file.seekFromEnd(0) catch unreachable;
+    _ = std.fmt.format(file.writer(), format, args) catch unreachable;
+    file.close();
+}
 
 pub fn main() !void {
-    init();
+    try init();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!gpa.deinit());
@@ -97,7 +111,7 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) nore
 }
 
 test {
-    init(); // setup for tests
+    try init(); // setup for tests
 
     // reference other tests in here
     _ = @import("movegen.zig");

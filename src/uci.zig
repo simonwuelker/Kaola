@@ -1,6 +1,10 @@
 //! Implements the Universal chess interface
 const std = @import("std");
 
+const Level = std.log.Level;
+const Scope = std.log.default;
+const log = @import("main.zig").log;
+
 const board = @import("board.zig");
 const parse_fen = board.parse_fen;
 const GameState = board.GameState;
@@ -44,6 +48,14 @@ const FenError = error {
     missing_field,
 };
 
+fn log_command(is_engine: bool, command: []const u8) void {
+    if (is_engine) {
+        log(Level.info, Scope, "[Engine]:\n\t{s}\n", .{command});
+    } else {
+        log(Level.info, Scope, "[Gui]:\n\t{s}\n", .{command});
+    }
+}
+
 /// Reads a block of non-whitespace characters and skips any number of following whitespaces
 pub fn read_fen(comptime Reader: type, src: Reader, allocator: Allocator) ![]const u8 {
     return std.mem.concat(allocator, u8, &.{
@@ -80,6 +92,7 @@ pub const EngineCommandTag = enum(u8) {
     id,
     readyok,
     bestmove,
+    info,
 };
 
 pub const GuiCommand = union(GuiCommandTag) {
@@ -116,6 +129,7 @@ pub const EngineCommand = union(EngineCommandTag) {
     id: struct { key: []const u8, value: []const u8 },
     readyok: void,
     bestmove: Move,
+    info: []const u8,
 };
 
 pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
@@ -129,16 +143,19 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
             _ = try std.fmt.format(stdout, "bestmove {s}\n", .{move_name});
             allocator.free(move_name);
         },
+        EngineCommandTag.info => |info| {
+            _ = try std.fmt.format(stdout, "info string {s}\n", .{info});
+        },
     }
 }
 
 pub fn next_command(allocator: Allocator) !GuiCommand {
     var buffer = [1]u8{0} ** UCI_COMMAND_MAX_LENGTH;
     const stdin = std.io.getStdIn().reader();
-    _ = allocator;
 
     read_command: while (true) {
         const input = (try stdin.readUntilDelimiter(&buffer, '\n'));
+        log_command(false, input);
         if (input.len == 0) continue;
 
         // var reader = fixedBufferStream(input).reader();
