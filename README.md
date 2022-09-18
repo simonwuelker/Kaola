@@ -12,6 +12,8 @@ To aid with debugging, the engine supports some commands not defined in the UCI 
 * **moves:** print all legal moves in the current position
 
 ## Development
+Mephisto builds on zig version `0.9.1`. Other versions *may* work, but likely won't due to the rapid
+development of the language.
 A neat trick for debugging is creating a file with a sequence of uci commands and then 
 `cat commands.txt | ./zig-out/bin/zigchess`.
 
