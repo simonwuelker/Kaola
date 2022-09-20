@@ -5,6 +5,8 @@ const Level = std.log.Level;
 const Scope = std.log.default;
 const log = @import("main.zig").log;
 
+const perft = @import("perft.zig");
+
 const board = @import("board.zig");
 const parse_fen = board.parse_fen;
 const GameState = board.GameState;
@@ -25,8 +27,8 @@ fn u32_from_str(str: []const u8) u32 {
     for(str) |c| {
         std.debug.assert('0' <= c);
         std.debug.assert(c <= '9');
-        x += c - '0';
         x *= 10;
+        x += c - '0';
     }
     return x;
 }
@@ -85,6 +87,7 @@ pub const GuiCommandTag = enum(u8) {
     eval,
     board,
     moves,
+    perft,
 };
 
 pub const EngineCommandTag = enum(u8) {
@@ -93,6 +96,7 @@ pub const EngineCommandTag = enum(u8) {
     readyok,
     bestmove,
     info,
+    report_perft,
 };
 
 pub const GuiCommand = union(GuiCommandTag) {
@@ -122,6 +126,7 @@ pub const GuiCommand = union(GuiCommandTag) {
         state: GameState,
     },
     debug: bool,
+    perft: u32,
 };
 
 pub const EngineCommand = union(EngineCommandTag) {
@@ -130,6 +135,7 @@ pub const EngineCommand = union(EngineCommandTag) {
     readyok: void,
     bestmove: Move,
     info: []const u8,
+    report_perft: perft.PerftResult,
 };
 
 pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
@@ -145,6 +151,27 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
         },
         EngineCommandTag.info => |info| {
             _ = try std.fmt.format(stdout, "info string {s}\n", .{info});
+        },
+        EngineCommandTag.report_perft => |report| {
+            const elapsed_nanos = @intToFloat(f64, report.time_elapsed);
+            const elapsed_seconds = elapsed_nanos / 1_000_000_000;
+            _ = try std.fmt.format(stdout, "{d:.3}s elapsed\n", .{elapsed_seconds});
+            if (report.nodes < 1000) {
+                _ = try std.fmt.format(stdout, "{} nodes explored\n", .{report.nodes});
+            } else if (report.nodes < 1_000_000) {
+                _ = try std.fmt.format(stdout, "{}K nodes explored\n", .{report.nodes / 1000});
+            } else {
+                _ = try std.fmt.format(stdout, "{}M nodes explored\n", .{report.nodes / 1_000_000});
+            }
+
+            const nps = @intToFloat(f64, report.nodes) / elapsed_seconds;
+            if (nps < 1000) {
+                _ = try std.fmt.format(stdout, "{d:.3}N/s\n", .{nps});
+            } else if (nps < 1_000_000) {
+                _ = try std.fmt.format(stdout, "{d:.3}KN/s\n", .{nps / 1000});
+            } else {
+                _ = try std.fmt.format(stdout, "{d:.3}MN/s\n", .{nps / 1_000_000});
+            }
         },
     }
 }
@@ -290,6 +317,9 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             return GuiCommand.board;
         } else if (std.mem.eql(u8, command, "moves")) {
             return GuiCommand.moves;
+        } else if (std.mem.eql(u8, command, "perft")) {
+            const depth = u32_from_str(words.next() orelse "3");
+            return GuiCommand{ .perft = depth };
         }
 
         // ignore unknown commands

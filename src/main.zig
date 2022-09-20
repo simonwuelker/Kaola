@@ -2,6 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Level = std.log.Level;
 const Scope = std.log.default;
+const OpenMode = std.fs.File.OpenMode;
 
 const bitboard = @import("bitboard.zig");
 
@@ -20,6 +21,8 @@ const GuiCommand = uci.GuiCommand;
 const EngineCommand = uci.EngineCommand;
 const send_command = uci.send_command;
 
+const perft = @import("perft.zig").perft;
+
 const LOG_FILE = "logs";
 
 pub fn init() !void {
@@ -34,7 +37,7 @@ pub fn init() !void {
 pub fn log(comptime message_level: Level, comptime scope: anytype, comptime format: []const u8, args: anytype) void {
     _ = scope;
     _ = message_level;
-    const file = std.fs.cwd().openFile(LOG_FILE, .{.write = true}) catch unreachable;
+    const file = std.fs.cwd().openFile(LOG_FILE, .{.mode = OpenMode.write_only}) catch unreachable;
     file.seekFromEnd(0) catch unreachable;
     _ = std.fmt.format(file.writer(), format, args) catch unreachable;
     file.close();
@@ -96,6 +99,10 @@ pub fn main() !void {
                     std.debug.print("{s}\n", .{move_name});
                     allocator.free(move_name);
                 }
+            },
+            GuiCommand.perft => |depth| {
+                const report = try perft(active_color, state, allocator, @intCast(u8, depth));
+                try send_command(EngineCommand{ .report_perft = report }, allocator);
             },
             GuiCommand.quit => break :mainloop,
         };

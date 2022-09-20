@@ -10,9 +10,10 @@ To aid with debugging, the engine supports some commands not defined in the UCI 
 * **board**: display the current board state
 * **eval:** return the evaluation of the current position
 * **moves:** print all legal moves in the current position
+* **perft [depth]**: benchmark movegen in current position
 
 ## Development
-Mephisto builds on zig version `0.9.1`. Other versions *may* work, but likely won't due to the rapid
+Mephisto builds on zig version `0.10.0`. Other versions *may* work, but likely won't due to the rapid
 development of the language.
 A neat trick for debugging is creating a file with a sequence of uci commands and then 
 `cat commands.txt | ./zig-out/bin/zigchess`.

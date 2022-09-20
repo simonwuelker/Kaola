@@ -400,12 +400,12 @@ pub const BoardRights = struct {
         _ = try writer.write("+--------+----------+-----------+\n");
         _ = try writer.write("| Castle | Kingside | Queenside |\n");
         _ = try writer.write("+--------+----------+-----------+\n");
-        _ = try std.fmt.format(writer, "| White  |{b:^10}|{b:^11}|\n", .{
+        _ = try std.fmt.format(writer, "| White  |{:^10}|{:^11}|\n", .{
             self.white_kingside,
             self.white_queenside,
         });
         _ = try writer.write("+--------+----------+-----------+\n");
-        _ = try std.fmt.format(writer, "| Black  |{b:^10}|{b:^11}|\n", .{
+        _ = try std.fmt.format(writer, "| Black  |{:^10}|{:^11}|\n", .{
             self.black_kingside,
             self.black_queenside,
         });

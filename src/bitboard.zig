@@ -90,7 +90,7 @@ fn bitboard_distance_to_edge(square: Square, shift: i5) u3 {
 /// Causes undefined behaviour if the bitboard has no bit set.
 pub inline fn get_lsb_square(board: Bitboard) Square {
     std.debug.assert(board != 0);
-    return @intToEnum(Square, @ctz(Bitboard, board));
+    return @intToEnum(Square, @ctz(board));
 }
 
 fn attacks_in_direction(start: Square, signed_shift: i5, blocked: Bitboard) Bitboard {
@@ -249,7 +249,7 @@ fn find_magic_number(square: Square, num_relevant_positions: u6, comptime bishop
         const magic: u64 = rng.next() & rng.next() & rng.next();
 
         // skip bad magic numbers
-        if (@popCount(u64, (occupancy_mask *% magic) >> 56) < 6) {
+        if (@popCount((occupancy_mask *% magic) >> 56) < 6) {
             continue;
         }
 
