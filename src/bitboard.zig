@@ -7,12 +7,172 @@ const board_module = @import("board.zig");
 const Square = board_module.Square;
 const Color = board_module.Color;
 const rand = @import("rand.zig");
-const magics = @import("magics.zig");
+// const magics = @import("magics.zig");
+
+pub const RANK_1 = 0xff00000000000000;
+pub const RANK_2 = 0x00ff000000000000;
+pub const RANK_3 = 0x0000ff0000000000;
+pub const RANK_4 = 0x000000ff00000000;
+pub const RANK_5 = 0x00000000ff000000;
+pub const RANK_6 = 0x0000000000ff0000;
+pub const RANK_7 = 0x000000000000ff00;
+pub const RANK_8 = 0x00000000000000ff;
+
+pub const FILE_A = 0x0101010101010101;
+pub const FILE_B = 0x0202020202020202;
+pub const FILE_C = 0x0404040404040404;
+pub const FILE_D = 0x0808080808080808;
+pub const FILE_E = 0x1010101010101010;
+pub const FILE_F = 0x2020202020202020;
+pub const FILE_G = 0x4040404040404040;
+pub const FILE_H = 0x8080808080808080;
 
 pub const Bitboard = u64;
 
+pub const Magic = struct {
+    ptr: []Bitboard,
+    mask: Bitboard,
+    shift: u6, 
+    magic: u64,
+
+    const Self = @This();
+
+    pub fn index(self: *const Self, occupied: Bitboard) u64 {
+        return ((occupied & self.mask) *% self.magic) >> self.shift;
+    }
+};
+
+var rook_table: [0x19000]Bitboard = undefined;
+var bishop_table: [0x1480]Bitboard = undefined;
+
+
+pub var rook_magics: [64]Magic = undefined;
+pub var bishop_magics: [64]Magic = undefined;
+
+pub const Slider = enum {
+    Straight,
+    Diagonal,
+};
+
+inline fn relevant_bits(comptime slider: Slider, square: u6) u6 {
+    switch (slider) {
+        Slider.Straight => return ROOK_RELEVANT_BITS[square],
+        Slider.Diagonal => return BISHOP_RELEVANT_BITS[square],
+    }
+}
+
+inline fn magics(comptime slider: Slider, square: u6) Magic {
+    switch (slider) {
+        Slider.Straight => return &rook_magics[square],
+        Slider.Diagonal => return &bishop_magics[square],
+    }
+}
+
+inline fn mask_rank(square: Square) Bitboard {
+    return RANK_8 << (8 * square.rank());
+}
+
+inline fn mask_file(square: Square) Bitboard {
+    return FILE_A << square.file();
+}
+
+fn generate_slider_attacks(comptime slider: Slider, square: Square, blocked: Bitboard) Bitboard {
+    var board: Bitboard = 0;
+    switch (slider) {
+        Slider.Straight => {
+            board |= attacks_in_direction(square, 8, blocked);
+            board |= attacks_in_direction(square, -8, blocked);
+            board |= attacks_in_direction(square, 1, blocked);
+            board |= attacks_in_direction(square, -1, blocked);
+        },
+        Slider.Diagonal => {
+            board |= attacks_in_direction(square, 7, blocked);
+            board |= attacks_in_direction(square, -7, blocked);
+            board |= attacks_in_direction(square, 9, blocked);
+            board |= attacks_in_direction(square, -9, blocked);
+        },
+    }
+    return board;
+}
+
+pub fn init_magics() void {
+    init_slider_magics(Slider.Straight);
+    init_slider_magics(Slider.Diagonal);
+}
+
+fn init_slider_magics(slider: Slider) void {
+    var square: u6 = 0;
+    var size: u32 = 0;
+
+    var reference_attacks: [4096]Bitboard = undefined;
+    var occupancies: [4096]Bitboard = undefined;
+
+    // Utility array to prevent having to reset the hash buckets on every failed attempt.
+    // (instead, we simply check if they were set in the current iteration and if not, overwrite them)
+    var last_modified_at: [4096]u64 = [1]u64{0} ** 4096;
+
+    while (true): (square += 1) {
+        const s = @intToEnum(Square, square);
+        const edges = ((RANK_1 | RANK_8) & ~mask_rank(s)) | ((FILE_A | FILE_H) & ~mask_file(s));
+
+        var m = magics(slider, square).*;
+        m.mask = generate_slider_attacks(slider, square, 0) & ~edges;
+        m.shift = ~@as(u6, 0) - relevant_bits(slider, square);
+        m.ptr = if (square == 0) 0 else magics(slider, square - 1).*.ptr + size;
+        m.magic = 0;
+
+        var i: u64 = 0;
+        const occupancy_combinations = @as(u64, 1) << relevant_bits(slider, square);
+        while (i < occupancy_combinations) : (i += 1) {
+            occupancies[i] = populate_occupancy_map(i, m.mask, occupancy_combinations);
+            reference_attacks[i] = generate_slider_attacks(slider, square, occupancies[i]);
+        }
+
+        size = occupancy_combinations;
+
+        // find magic number
+        var rng = rand.Rand64.new();
+        search_magic: while (true) {
+            // random number with a low number of set bits
+            const magic: u64 = rng.next() & rng.next() & rng.next();
+
+            // skip bad magic numbers
+            if (@popCount((m.mask *% magic) >> 56) < 6) continue;
+            m.magic = magic;
+
+            i = 0;
+            while (i < occupancy_combinations) : (i += 1) {
+                const hash = m.index(occupancies[i]);
+
+                // we use m.attacks as an array of hash buckets.
+                // That way, if we find a good magic number, the attack table will already be filled
+
+                // The epoch number is "i + 1" instead of just "i" because i starts at zero and the last_modified
+                // value should be smaller but also unsigned - so we take a seperate counter that is i + 1 as the 
+                // epoch number
+                if (last_modified_at[hash] < i + 1) {
+                    // bucket unused
+                    m.attacks[hash] = reference_attacks[i];
+                    last_modified_at = i + 1;
+                } else if (m.attacks[hash] != reference_attacks[i]) {
+                    // hash collision with different attacks, bad magic value
+                    // note that we do allow hash collisions as long as they produce the same attack pattern
+                    continue :search_magic;
+                }
+            }
+
+            // if we haven't hit a continue yet, the magic value does not produce hash collisions
+            return magic;
+        }
+
+
+
+        if (square == 63) break;
+    }
+}
+
 pub fn print_bitboard(board: Bitboard, title: []const u8) void {
-    std.debug.print("\n==> {s}\n", .{title});
+    std.debug.print("\n==> {s}(0x{x})\n", .{title, board});
     var i: u6 = 0;
     while (i < 8) : (i += 1) {
         std.debug.print("{d}  ", .{8 - i});
@@ -93,16 +253,20 @@ pub inline fn get_lsb_square(board: Bitboard) Square {
     return @intToEnum(Square, @ctz(board));
 }
 
-fn attacks_in_direction(start: Square, signed_shift: i5, blocked: Bitboard) Bitboard {
+pub fn attacks_in_direction(start: Square, signed_shift: i5, blocked: Bitboard) Bitboard {
+    const blocked_not_by_me = blocked ^ start.as_board();
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
+    // std.debug.print("max moves: {d}\n", .{max_moves});
+    // std.debug.print("start square: {s}\n", .{@tagName(start)});
     const negative_shift = if (signed_shift < 0) true else false;
     const shift: u5 = std.math.absCast(signed_shift);
     var square = @enumToInt(start);
-    var attack_mask: u64 = 0;
+    // std.debug.print("is blocked here: {}\n", .{(blocked >> square) & 1 == 1});
+    var attack_mask: Bitboard = 0;
     var i: u3 = 0;
-    while (i < max_moves and (blocked >> square) & 1 == 0) : (i += 1) {
+    while (i < max_moves and (blocked_not_by_me >> square) & 1 == 0) : (i += 1) {
         if (negative_shift) square -= shift else square += shift;
-        attack_mask |= @as(u64, 1) << square;
+        attack_mask |= @as(Bitboard, 1) << square;
     }
     return attack_mask;
 }
@@ -113,11 +277,11 @@ fn mask_in_direction(start: Square, signed_shift: i5) Bitboard {
     const negative_shift = if (signed_shift < 0) true else false;
     const shift: u5 = std.math.absCast(signed_shift);
     var square = @enumToInt(start);
-    var mask: u64 = 0;
+    var mask: Bitboard = 0;
     var i: u3 = 0;
     while (i < max_moves - 1) : (i += 1) {
         if (negative_shift) square -= shift else square += shift;
-        mask |= @as(u64, 1) << square;
+        mask |= @as(Bitboard, 1) << square;
     }
     return mask;
 }
@@ -192,23 +356,6 @@ pub fn rook_relevant_positions(square: Square) Bitboard {
     return board;
 }
 
-fn generate_bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
-    var board: u64 = 0;
-    board |= attacks_in_direction(square, 7, blocked);
-    board |= attacks_in_direction(square, -7, blocked);
-    board |= attacks_in_direction(square, 9, blocked);
-    board |= attacks_in_direction(square, -9, blocked);
-    return board;
-}
-
-pub fn generate_rook_attacks(square: Square, blocked: Bitboard) Bitboard {
-    var board: u64 = 0;
-    board |= attacks_in_direction(square, 8, blocked);
-    board |= attacks_in_direction(square, -8, blocked);
-    board |= attacks_in_direction(square, 1, blocked);
-    board |= attacks_in_direction(square, -1, blocked);
-    return board;
-}
 
 fn populate_occupancy_map(index_: Bitboard, attack_map_: Bitboard, num_bits: u6) Bitboard {
     var index = index_;
@@ -242,83 +389,6 @@ fn find_magic_number(square: Square, num_relevant_positions: u6, comptime bishop
         attacks[i] = if (bishop) generate_bishop_attacks(square, occupancies[i]) else generate_rook_attacks(square, occupancies[i]);
     }
 
-    // find magic number
-    var rng = rand.Rand64.new();
-    search_magic: while (true) {
-        // random number with a low number of set bits
-        const magic: u64 = rng.next() & rng.next() & rng.next();
-
-        // skip bad magic numbers
-        if (@popCount((occupancy_mask *% magic) >> 56) < 6) {
-            continue;
-        }
-
-        var hash_buckets: [4096]u64 = [1]u64{0} ** 4096;
-        std.mem.set(u64, hash_buckets[0..hash_buckets.len], 0);
-
-        var index: u64 = 0;
-        while (index < num_blocking_combinations) : (index += 1) {
-            var hash: u64 = (occupancies[index] *% magic) >> (~num_relevant_positions + 1);
-            if (hash_buckets[hash] == 0) {
-                // bucket unused
-                hash_buckets[hash] = attacks[index];
-            } else if (hash_buckets[hash] != attacks[index]) {
-                // hash collision with different attacks, bad magic value
-                // note that we do allow hash collisions as long as they produce the same attack pattern
-                continue :search_magic;
-            }
-        }
-
-        // if we haven't hit a continue yet, the magic value does not produce hash collisions
-        return magic;
-    }
-}
-
-var bishop_attack_table: [64][512]Bitboard = undefined;
-var bishop_blocking_positions: [64]Bitboard = undefined;
-var rook_attack_table: [64][4096]Bitboard = undefined;
-var rook_blocking_positions: [64]Bitboard = undefined;
-
-pub fn init_magic_numbers() void {
-    var square: u6 = 0;
-    while (true) : (square += 1) {
-        // bishop_magic_numbers[square] = find_magic_number(square, BISHOP_RELEVANT_BITS[square], true);
-        // rook_magic_numbers[square] = find_magic_number(square, ROOK_RELEVANT_BITS[square], false);
-        std.debug.print("0x{x}\n", .{find_magic_number(@intToEnum(Square, square), ROOK_RELEVANT_BITS[square], false)});
-        if (square == 63) break;
-    }
-}
-
-pub fn init_slider_attacks() void {
-    var square_index: u6 = 0;
-    while (true) : (square_index += 1) {
-        const square = @intToEnum(Square, square_index);
-        const relevant_positions = bishop_relevant_positions(square);
-        bishop_blocking_positions[square_index] = relevant_positions;
-        const num_positions: u6 = BISHOP_RELEVANT_BITS[square_index];
-        var index: u64 = 0;
-        while (index < @as(u64, 1) << num_positions) : (index += 1) {
-            const blocked: Bitboard = populate_occupancy_map(index, relevant_positions, num_positions);
-            const hash = (blocked *% magics.BISHOP_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
-            bishop_attack_table[square_index][hash] = generate_bishop_attacks(square, blocked);
-        }
-
-        if (square_index == 63) break;
-    }
-    square_index = 0;
-    while (true) : (square_index += 1) {
-        const square = @intToEnum(Square, square_index);
-        const relevant_positions = rook_relevant_positions(square);
-        rook_blocking_positions[square_index] = relevant_positions;
-        const num_positions: u6 = ROOK_RELEVANT_BITS[square_index];
-        var index: u64 = 0;
-        while (index < @as(u64, 1) << num_positions) : (index += 1) {
-            const blocked: Bitboard = populate_occupancy_map(index, relevant_positions, num_positions);
-            const hash = (blocked *% magics.ROOK_MAGIC_NUMBERS[square_index]) >> (~num_positions + 1);
-            rook_attack_table[square_index][hash] = generate_rook_attacks(square, blocked);
-        }
-        if (square_index == 63) break;
-    }
 }
 
 pub fn bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
@@ -379,7 +449,7 @@ pub inline fn path_between_squares(from: Square, to: Square) Bitboard {
 test "rook attacks" {
     const expectEqual = std.testing.expectEqual;
 
-    // C4, D1, D7 and G6 blocked
+    // D4, C4, D1, D7 and G6 blocked
     const blocked = 0x800000400400800;
     try expectEqual(rook_attacks(Square.D4, blocked), 0x80808f408080800);
 
@@ -389,8 +459,8 @@ test "rook attacks" {
 test "bishop attacks" {
     const expectEqual = std.testing.expectEqual;
 
-    // C5, F6, G1 and G3 blocked
-    const blocked = 0x4000400004200000;
+    // D4, C5, F6, G1 and G3 blocked
+    const blocked = 0x4000052000000;
     try expectEqual(bishop_attacks(Square.D4, blocked), 0x4122140014200000);
 
     try expectEqual(bishop_attacks(Square.A1, 0), 0x2040810204080);

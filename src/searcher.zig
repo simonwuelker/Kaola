@@ -34,7 +34,7 @@ fn alpha_beta_search(comptime active_color: Color, state: GameState, depth: u8, 
     for (move_list.items) |move_to_consider| {
         const new_state = state.make_move(active_color, move_to_consider);
         const new_color = comptime active_color.other();
-        const score = try max_value(new_color, new_state, depth - 1, allocator, MIN_SCORE, MAX_SCORE);
+        const score = try min_value(new_color, new_state, depth - 1, allocator, MIN_SCORE, MAX_SCORE);
 
         if (score > best_score) {
             best_move = move_to_consider;
