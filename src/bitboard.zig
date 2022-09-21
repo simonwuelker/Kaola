@@ -9,28 +9,28 @@ const Color = board_module.Color;
 const rand = @import("rand.zig");
 // const magics = @import("magics.zig");
 
-pub const RANK_1 = 0xff00000000000000;
-pub const RANK_2 = 0x00ff000000000000;
-pub const RANK_3 = 0x0000ff0000000000;
-pub const RANK_4 = 0x000000ff00000000;
-pub const RANK_5 = 0x00000000ff000000;
-pub const RANK_6 = 0x0000000000ff0000;
-pub const RANK_7 = 0x000000000000ff00;
-pub const RANK_8 = 0x00000000000000ff;
+pub const RANK_1: Bitboard = 0xff00000000000000;
+pub const RANK_2: Bitboard = 0x00ff000000000000;
+pub const RANK_3: Bitboard = 0x0000ff0000000000;
+pub const RANK_4: Bitboard = 0x000000ff00000000;
+pub const RANK_5: Bitboard = 0x00000000ff000000;
+pub const RANK_6: Bitboard = 0x0000000000ff0000;
+pub const RANK_7: Bitboard = 0x000000000000ff00;
+pub const RANK_8: Bitboard = 0x00000000000000ff;
 
-pub const FILE_A = 0x0101010101010101;
-pub const FILE_B = 0x0202020202020202;
-pub const FILE_C = 0x0404040404040404;
-pub const FILE_D = 0x0808080808080808;
-pub const FILE_E = 0x1010101010101010;
-pub const FILE_F = 0x2020202020202020;
-pub const FILE_G = 0x4040404040404040;
-pub const FILE_H = 0x8080808080808080;
+pub const FILE_A: Bitboard = 0x0101010101010101;
+pub const FILE_B: Bitboard = 0x0202020202020202;
+pub const FILE_C: Bitboard = 0x0404040404040404;
+pub const FILE_D: Bitboard = 0x0808080808080808;
+pub const FILE_E: Bitboard = 0x1010101010101010;
+pub const FILE_F: Bitboard = 0x2020202020202020;
+pub const FILE_G: Bitboard = 0x4040404040404040;
+pub const FILE_H: Bitboard = 0x8080808080808080;
 
 pub const Bitboard = u64;
 
 pub const Magic = struct {
-    ptr: []Bitboard,
+    attacks: []Bitboard,
     mask: Bitboard,
     shift: u6, 
     magic: u64,
@@ -45,8 +45,7 @@ pub const Magic = struct {
 var rook_table: [0x19000]Bitboard = undefined;
 var bishop_table: [0x1480]Bitboard = undefined;
 
-
-pub var rook_magics: [64]Magic = undefined;
+var rook_magics: [64]Magic = undefined;
 pub var bishop_magics: [64]Magic = undefined;
 
 pub const Slider = enum {
@@ -61,48 +60,67 @@ inline fn relevant_bits(comptime slider: Slider, square: u6) u6 {
     }
 }
 
-inline fn magics(comptime slider: Slider, square: u6) Magic {
+inline fn magics(comptime slider: Slider, square: u6) *Magic {
     switch (slider) {
         Slider.Straight => return &rook_magics[square],
         Slider.Diagonal => return &bishop_magics[square],
     }
 }
 
+fn attack_table(comptime slider: Slider) []Bitboard {
+    switch (slider) {
+        Slider.Straight => return rook_table[0..rook_table.len],
+        Slider.Diagonal => return bishop_table[0..bishop_table.len],
+    }
+}
+
 inline fn mask_rank(square: Square) Bitboard {
-    return RANK_8 << (8 * square.rank());
+    return RANK_8 << (8 * @intCast(u6, square.rank()));
 }
 
 inline fn mask_file(square: Square) Bitboard {
     return FILE_A << square.file();
 }
 
+fn attacks_in_direction(start: Square, signed_shift: i5, blocked: Bitboard) Bitboard {
+    const max_moves = bitboard_distance_to_edge(start, signed_shift);
+    const negative_shift = if (signed_shift < 0) true else false;
+    const shift: u5 = std.math.absCast(signed_shift);
+    var square = @enumToInt(start);
+    var attack_mask: Bitboard = 0;
+    var i: u3 = 0;
+    while (i < max_moves and (blocked >> square) & 1 == 0) : (i += 1) {
+        if (negative_shift) square -= shift else square += shift;
+        attack_mask |= @as(Bitboard, 1) << square;
+    }
+    return attack_mask;
+}
+
 fn generate_slider_attacks(comptime slider: Slider, square: Square, blocked: Bitboard) Bitboard {
-    var board: Bitboard = 0;
     switch (slider) {
         Slider.Straight => {
-            board |= attacks_in_direction(square, 8, blocked);
-            board |= attacks_in_direction(square, -8, blocked);
-            board |= attacks_in_direction(square, 1, blocked);
-            board |= attacks_in_direction(square, -1, blocked);
+            return attacks_in_direction(square, 8, blocked)
+                | attacks_in_direction(square, -8, blocked)
+                | attacks_in_direction(square, 1, blocked)
+                | attacks_in_direction(square, -1, blocked);
         },
         Slider.Diagonal => {
-            board |= attacks_in_direction(square, 7, blocked);
-            board |= attacks_in_direction(square, -7, blocked);
-            board |= attacks_in_direction(square, 9, blocked);
-            board |= attacks_in_direction(square, -9, blocked);
+            return attacks_in_direction(square, 7, blocked)
+                | attacks_in_direction(square, -7, blocked)
+                | attacks_in_direction(square, 9, blocked)
+                | attacks_in_direction(square, -9, blocked);
         },
     }
-    return board;
 }
 
-pub fn init_magics() void {
-    init_slider_magics(Slider.Straight);
-    init_slider_magics(Slider.Diagonal);
+pub fn init_magics(seed: u64) void {
+    init_slider_magics(Slider.Straight, seed);
+    // init_slider_magics(Slider.Diagonal, seed);
 }
 
-fn init_slider_magics(slider: Slider) void {
+fn init_slider_magics(comptime slider: Slider, seed: u64) void {
     var square: u6 = 0;
-    var size: u32 = 0;
+    var size: u64 = 0;
 
     var reference_attacks: [4096]Bitboard = undefined;
     var occupancies: [4096]Bitboard = undefined;
@@ -110,38 +128,47 @@ fn init_slider_magics(slider: Slider) void {
     // Utility array to prevent having to reset the hash buckets on every failed attempt.
     // (instead, we simply check if they were set in the current iteration and if not, overwrite them)
     var last_modified_at: [4096]u64 = [1]u64{0} ** 4096;
+    var epoch: u64 = 0;
 
-    while (true): (square += 1) {
+    var rng = rand.Rand64.new_with_seed(seed);
+
+    var total_attack_size: u64 = 0;
+    next_square: while (true): (square += 1) {
         const s = @intToEnum(Square, square);
         const edges = ((RANK_1 | RANK_8) & ~mask_rank(s)) | ((FILE_A | FILE_H) & ~mask_file(s));
 
-        var m = magics(slider, square).*;
-        m.mask = generate_slider_attacks(slider, square, 0) & ~edges;
-        m.shift = ~@as(u6, 0) - relevant_bits(slider, square);
-        m.ptr = if (square == 0) 0 else magics(slider, square - 1).*.ptr + size;
-        m.magic = 0;
+        var m = magics(slider, square);
+        m.*.mask = generate_slider_attacks(slider, s, 0) & ~edges;
+        m.*.shift = ~@as(u6, 0) - relevant_bits(slider, square) + 1;
+        m.*.magic = 0;
 
-        var i: u64 = 0;
-        const occupancy_combinations = @as(u64, 1) << relevant_bits(slider, square);
-        while (i < occupancy_combinations) : (i += 1) {
-            occupancies[i] = populate_occupancy_map(i, m.mask, occupancy_combinations);
-            reference_attacks[i] = generate_slider_attacks(slider, square, occupancies[i]);
+        var blocked: Bitboard = 0;
+        size = 0;
+        // use carry-rippler trick to iterate through every possible blocking combination
+        while(true) {
+            occupancies[size] = blocked;
+            reference_attacks[size] = generate_slider_attacks(slider, s, blocked);
+
+            size += 1;
+            blocked = (blocked -% m.mask) & m.mask;
+
+            if (blocked == 0) break;
         }
-
-        size = occupancy_combinations;
+        m.*.attacks = attack_table(slider)[total_attack_size..total_attack_size + size];
+        total_attack_size += size;
 
         // find magic number
-        var rng = rand.Rand64.new();
         search_magic: while (true) {
             // random number with a low number of set bits
             const magic: u64 = rng.next() & rng.next() & rng.next();
 
             // skip bad magic numbers
-            if (@popCount((m.mask *% magic) >> 56) < 6) continue;
-            m.magic = magic;
+            if (@popCount((m.*.mask *% magic) >> 56) < 6) continue;
+            m.*.magic = magic;
 
-            i = 0;
-            while (i < occupancy_combinations) : (i += 1) {
+            epoch += 1;
+            var i: u64 = 0;
+            while (i < size) : (i += 1) {
                 const hash = m.index(occupancies[i]);
 
                 // we use m.attacks as an array of hash buckets.
@@ -150,24 +177,19 @@ fn init_slider_magics(slider: Slider) void {
                 // The epoch number is "i + 1" instead of just "i" because i starts at zero and the last_modified
                 // value should be smaller but also unsigned - so we take a seperate counter that is i + 1 as the 
                 // epoch number
-                if (last_modified_at[hash] < i + 1) {
+                if (last_modified_at[hash] < epoch) {
                     // bucket unused
                     m.attacks[hash] = reference_attacks[i];
-                    last_modified_at = i + 1;
+                    last_modified_at[hash] = epoch;
                 } else if (m.attacks[hash] != reference_attacks[i]) {
                     // hash collision with different attacks, bad magic value
                     // note that we do allow hash collisions as long as they produce the same attack pattern
                     continue :search_magic;
                 }
             }
-
-            // if we haven't hit a continue yet, the magic value does not produce hash collisions
-            return magic;
+            // if we haven't hit continue yet, then the magic is good
+            if (square == 63) break :next_square else continue :next_square;
         }
-
-
-
-        if (square == 63) break;
     }
 }
 
@@ -253,23 +275,6 @@ pub inline fn get_lsb_square(board: Bitboard) Square {
     return @intToEnum(Square, @ctz(board));
 }
 
-pub fn attacks_in_direction(start: Square, signed_shift: i5, blocked: Bitboard) Bitboard {
-    const blocked_not_by_me = blocked ^ start.as_board();
-    const max_moves = bitboard_distance_to_edge(start, signed_shift);
-    // std.debug.print("max moves: {d}\n", .{max_moves});
-    // std.debug.print("start square: {s}\n", .{@tagName(start)});
-    const negative_shift = if (signed_shift < 0) true else false;
-    const shift: u5 = std.math.absCast(signed_shift);
-    var square = @enumToInt(start);
-    // std.debug.print("is blocked here: {}\n", .{(blocked >> square) & 1 == 1});
-    var attack_mask: Bitboard = 0;
-    var i: u3 = 0;
-    while (i < max_moves and (blocked_not_by_me >> square) & 1 == 0) : (i += 1) {
-        if (negative_shift) square -= shift else square += shift;
-        attack_mask |= @as(Bitboard, 1) << square;
-    }
-    return attack_mask;
-}
 
 fn mask_in_direction(start: Square, signed_shift: i5) Bitboard {
     const max_moves = bitboard_distance_to_edge(start, signed_shift);
@@ -356,95 +361,58 @@ pub fn rook_relevant_positions(square: Square) Bitboard {
     return board;
 }
 
-
-fn populate_occupancy_map(index_: Bitboard, attack_map_: Bitboard, num_bits: u6) Bitboard {
-    var index = index_;
-    var attack_map: Bitboard = attack_map_;
-    var occupied: Bitboard = 0;
-    var count: u6 = 0;
-    while (count < num_bits) : (count += 1) {
-        // continously pop the ls1b
-        // truncate is safe here because there because we will never reach attack_map = 0
-        const square = get_lsb_square(attack_map);
-        attack_map ^= square.as_board();
-
-        if (index & 1 != 0) {
-            occupied |= square.as_board();
-        }
-        index >>= 1;
-    }
-    return occupied;
-}
-
-fn find_magic_number(square: Square, num_relevant_positions: u6, comptime bishop: bool) Bitboard {
-    var attacks: [4096]Bitboard = undefined;
-    var occupancies: [4096]Bitboard = undefined;
-    const occupancy_mask = if (bishop) bishop_relevant_positions(square) else rook_relevant_positions(square);
-    const num_blocking_combinations: u64 = @as(u64, 1) << num_relevant_positions;
-
-    // populate attack/occupancy tables
-    var i: u64 = 0;
-    while (i < num_blocking_combinations) : (i += 1) {
-        occupancies[i] = populate_occupancy_map(i, occupancy_mask, num_relevant_positions);
-        attacks[i] = if (bishop) generate_bishop_attacks(square, occupancies[i]) else generate_rook_attacks(square, occupancies[i]);
-    }
-
-}
-
 pub fn bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
-    // mask off the pieces we don't care about
-    const relevant_blocks = blocked & bishop_blocking_positions[@enumToInt(square)];
-    const hash = (relevant_blocks *% magics.BISHOP_MAGIC_NUMBERS[@enumToInt(square)]) >> (~BISHOP_RELEVANT_BITS[@enumToInt(square)] + 1);
-    return bishop_attack_table[@enumToInt(square)][hash];
+    const magic = bishop_magics[@enumToInt(square)];
+    print_bitboard(magic.mask, "mask");
+    std.debug.print("magic attacks len: {d}\n", .{magic.attacks.len});
+    return magic.attacks[magic.index(blocked)];
 }
 
 pub fn rook_attacks(square: Square, blocked: Bitboard) Bitboard {
-    // mask off the pieces we don't care about
-    const relevant_blocks = blocked & rook_blocking_positions[@enumToInt(square)];
-    const hash = (relevant_blocks *% magics.ROOK_MAGIC_NUMBERS[@enumToInt(square)]) >> (~ROOK_RELEVANT_BITS[@enumToInt(square)] + 1);
-    return rook_attack_table[@enumToInt(square)][hash];
+    const magic = rook_magics[@enumToInt(square)];
+    return magic.attacks[magic.index(blocked)];
 }
 
-/// A lookup table containing the paths between any two squares on the board.
-/// Source square is included, target square is not.
-/// The table should be indexed like this: `PATH_BETWEEN_SQUARES[source][target]`.
-/// Results is undefined if source == target
-var PATH_BETWEEN_SQUARES: [64][64]Bitboard = undefined;
-
-pub fn init_paths_between_squares() void {
-    var source_index: u6 = 0;
-    while (true) : (source_index += 1) {
-        var target_index: u6 = 0;
-        while (true) : (target_index += 1) {
-            const source = @intToEnum(Square, source_index);
-            const target = @intToEnum(Square, target_index);
-
-            const blocked = source.as_board() | target.as_board();
-            // if horizontally aligned
-            if (source.rank() == target.rank() or source.file() == target.file()) {
-                PATH_BETWEEN_SQUARES[source_index][target_index] = rook_attacks(source, blocked) & rook_attacks(target, blocked);
-                PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
-            }
-            // if diagonally aligned (if the absolute difference between their ranks is the same as their files
-            else if (@maximum(source.rank(), target.rank()) - @minimum(source.rank(), target.rank()) ==
-                @maximum(source.file(), target.file()) - @minimum(source.file(), target.file()))
-            {
-                PATH_BETWEEN_SQUARES[source_index][target_index] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
-                PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
-            } else {
-                // no straight path => 0
-                PATH_BETWEEN_SQUARES[source_index][target_index] = 0;
-            }
-            if (target_index == 63) break;
-        }
-
-        if (source_index == 63) break;
-    }
-}
-
-pub inline fn path_between_squares(from: Square, to: Square) Bitboard {
-    return PATH_BETWEEN_SQUARES[@enumToInt(from)][@enumToInt(to)];
-}
+// /// A lookup table containing the paths between any two squares on the board.
+// /// Source square is included, target square is not.
+// /// The table should be indexed like this: `PATH_BETWEEN_SQUARES[source][target]`.
+// /// Results is undefined if source == target
+// var PATH_BETWEEN_SQUARES: [64][64]Bitboard = undefined;
+// 
+// pub fn init_paths_between_squares() void {
+//     var source_index: u6 = 0;
+//     while (true) : (source_index += 1) {
+//         var target_index: u6 = 0;
+//         while (true) : (target_index += 1) {
+//             const source = @intToEnum(Square, source_index);
+//             const target = @intToEnum(Square, target_index);
+// 
+//             const blocked = source.as_board() | target.as_board();
+//             // if horizontally aligned
+//             if (source.rank() == target.rank() or source.file() == target.file()) {
+//                 PATH_BETWEEN_SQUARES[source_index][target_index] = rook_attacks(source, blocked) & rook_attacks(target, blocked);
+//                 PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
+//             }
+//             // if diagonally aligned (if the absolute difference between their ranks is the same as their files
+//             else if (@maximum(source.rank(), target.rank()) - @minimum(source.rank(), target.rank()) ==
+//                 @maximum(source.file(), target.file()) - @minimum(source.file(), target.file()))
+//             {
+//                 PATH_BETWEEN_SQUARES[source_index][target_index] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
+//                 PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
+//             } else {
+//                 // no straight path => 0
+//                 PATH_BETWEEN_SQUARES[source_index][target_index] = 0;
+//             }
+//             if (target_index == 63) break;
+//         }
+// 
+//         if (source_index == 63) break;
+//     }
+// }
+// 
+// pub inline fn path_between_squares(from: Square, to: Square) Bitboard {
+//     return PATH_BETWEEN_SQUARES[@enumToInt(from)][@enumToInt(to)];
+// }
 
 test "rook attacks" {
     const expectEqual = std.testing.expectEqual;

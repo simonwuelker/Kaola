@@ -23,6 +23,8 @@ const send_command = uci.send_command;
 
 const perft = @import("perft.zig").perft;
 
+const bitops = @import("bitops.zig");
+
 const LOG_FILE = "logs";
 
 pub fn init() !void {
@@ -30,7 +32,7 @@ pub fn init() !void {
     _ = try std.fs.cwd().createFile(LOG_FILE, .{});
     bitboard.init_magics();
     // bitboard.init_slider_attacks();
-    bitboard.init_paths_between_squares(); // depends on initialized slider attacks
+    // bitboard.init_paths_between_squares(); // depends on initialized slider attacks
     pesto.init_tables();
 }
 
@@ -44,22 +46,54 @@ pub fn log(comptime message_level: Level, comptime scope: anytype, comptime form
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(!gpa.deinit());
-    var allocator = gpa.allocator();
+    std.debug.print("has pext: {}\n", .{bitops.has_pext()});
+    std.debug.print("pext(1, 1): {}\n", .{bitops.pext(1, 1)});
+    // var rook_table: [0x19000]u64 = undefined;
+    // const slice = rook_table[3..10];
+    // std.debug.print("len {d}\n", .{slice.len});
+    // const slice2 = slice[0..4];
+    // std.debug.print("len {d}\n", .{slice2.len});
+    // const Instant = std.time.Instant;
 
-    try init();
+    // var min_time: u64 = ~@as(u64, 0);
+    // var min_seed: u64 = 0;
 
-    _ = allocator;
-    const Square = board.Square;
-    const Bitboard = bitboard.Bitboard;
+    // const bishop_seed = 6826;
+    // _ = bishop_seed;
 
-    std.debug.print("================", .{});
-    const blocked: Bitboard = 0xfdfe040044229bf7;
-    bitboard.print_bitboard(blocked, "blocked");
-    const attacks = bitboard.attacks_in_direction(Square.A1, -8, blocked);
+    // var i: u64 = 1;
+    // while(i < 10000): (i += 1) {
+    //     if (i % 100 == 0) {
+    //         std.debug.print("{d}\n", .{i});
+    //     }
+    //     const start = try Instant.now();
+    //     bitboard.init_magics(i);
+    //     const end = try Instant.now();
+    //     const elapsed = end.since(start);
+    //     if (elapsed < min_time) {
+    //         min_time = elapsed;
+    //         min_seed = i;
+    //     }
+    // }
+    // std.debug.print("minimal time: {d:.3}ms\n", .{@intToFloat(f64, min_time / 1_000_000)});
+    // std.debug.print("best seed: {d}\n", .{min_seed});
 
-    bitboard.print_bitboard(attacks, "rook attacks");
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // defer std.debug.assert(!gpa.deinit());
+    // var allocator = gpa.allocator();
+
+    // try init();
+    // _ = allocator;
+
+    // _ = allocator;
+    // const Square = board.Square;
+    // const Bitboard = bitboard.Bitboard;
+
+    // std.debug.print("================", .{});
+    // const blocked: Bitboard = 0xfdfe040044229bf7;
+    // bitboard.print_bitboard(blocked, "blocked");
+
+    // bitboard.print_bitboard(bitboard.bishop_attacks(Square.E4, blocked), "rook attacks");
 
 
     // will probably be overwritten by "ucinewgame" but it prevents undefined behaviour
