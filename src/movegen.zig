@@ -233,9 +233,18 @@ pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayLis
     // legal straight slider moves
     // diagonally pinned straight sliders can never move
     var unpinned_rooks = straight_sliders & ~pinmask.both;
+    bitboard.print_bitboard(unpinned_rooks, "unpinned rooks");
     while (unpinned_rooks != 0) : (pop_ls1b(&unpinned_rooks)) {
         const square = get_lsb_square(unpinned_rooks);
         const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask;
+        if (square == Square.A1) {
+            std.debug.print("rook on a1\n", .{});
+            bitboard.print_bitboard(rook_attacks(square, pos.occupied), "attacks");
+            bitboard.print_bitboard(enemy_or_empty, "enemy or empty");
+            bitboard.print_bitboard(pos.occupied, "occupied");
+
+            bitboard.print_bitboard(moves, "moves");
+        }
         const from = square.as_board();
 
         if (from & pos.rooks(us) != 0) {

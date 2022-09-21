@@ -296,6 +296,7 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             if (maybe_moves_str) |moves_str| {
                 var moves = std.mem.split(u8, std.mem.trim(u8, moves_str, " "), " ");
                 while (moves.next()) |move_str| {
+                    std.debug.print("parsing move {s}\n", .{move_str});
                     const move = try Move.from_str(move_str, allocator, active_color, state);// catch continue :read_command;
                     switch (active_color) {
                         Color.white => {
