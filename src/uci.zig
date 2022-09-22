@@ -155,14 +155,7 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
         EngineCommandTag.report_perft => |report| {
             const elapsed_nanos = @intToFloat(f64, report.time_elapsed);
             const elapsed_seconds = elapsed_nanos / 1_000_000_000;
-            _ = try std.fmt.format(stdout, "{d:.3}s elapsed\n", .{elapsed_seconds});
-            if (report.nodes < 1000) {
-                _ = try std.fmt.format(stdout, "{} nodes explored\n", .{report.nodes});
-            } else if (report.nodes < 1_000_000) {
-                _ = try std.fmt.format(stdout, "{}K nodes explored\n", .{report.nodes / 1000});
-            } else {
-                _ = try std.fmt.format(stdout, "{}M nodes explored\n", .{report.nodes / 1_000_000});
-            }
+            _ = try std.fmt.format(stdout, "{} nodes explored\n", .{report.nodes});
 
             const nps = @intToFloat(f64, report.nodes) / elapsed_seconds;
             if (nps < 1000) {

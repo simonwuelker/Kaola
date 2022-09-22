@@ -384,15 +384,68 @@ pub const BoardRights = struct {
     }
 
     pub fn make_move(self: *const Self, comptime color: Color, move: Move) Self {
-        // noop for now
-        _ = color;
-        _ = move;
+        var en_passant: ?Square = null; // resets after each move by default
+        var white_kingside = self.white_kingside;
+        var white_queenside = self.white_queenside;
+        var black_kingside = self.black_kingside;
+        var black_queenside = self.black_queenside;
+
+        switch (move.move_type) {
+            MoveType.double_push => {
+                // Update en passant rights
+                const to = bitboard.get_lsb_square(move.to);
+                switch (color) {
+                    Color.white => en_passant = to.down_one(),
+                    Color.black => en_passant = to.up_one(),
+                }
+            },
+            MoveType.quiet => |piece_type| {
+                if (piece_type == PieceType.king) {
+                    switch (color) {
+                        Color.white => {
+                            white_kingside = false;
+                            white_queenside = false;
+                        },
+                        Color.black => {
+                            black_kingside = false;
+                            black_queenside = false;
+                        },
+                    }
+                }
+            },
+            MoveType.capture => |piece_type| {
+                if (piece_type == PieceType.king) {
+                    switch (color) {
+                        Color.white => {
+                            white_kingside = false;
+                            white_queenside = false;
+                        },
+                        Color.black => {
+                            black_kingside = false;
+                            black_queenside = false;
+                        },
+                    }
+                }
+            },
+            else => {},
+        }
+
+        if (move.from == Square.A1.as_board()) {
+            white_queenside = false;
+        } else if (move.from == Square.A8.as_board()) {
+            black_queenside = false;
+        } else if (move.from == Square.H1.as_board()) {
+            white_kingside = false;
+        } else if (move.from == Square.H8.as_board()) {
+            black_kingside = false;
+        }
+
         return Self {
-            .en_passant = self.en_passant,
-            .white_kingside = self.white_kingside,
-            .white_queenside = self.white_queenside,
-            .black_kingside = self.black_kingside,
-            .black_queenside = self.black_queenside,
+            .en_passant = en_passant,
+            .white_kingside = white_kingside,
+            .white_queenside = white_queenside,
+            .black_kingside = black_kingside,
+            .black_queenside = black_queenside,
         };
     }
 
@@ -621,7 +674,7 @@ pub const Position = struct {
                         return Self.new(wp ^ (from | to), wn, wb, wr, wq, wk, bp, bn, bb, br, bq, bk);
                     },
                     MoveTag.promote => |promote_to| {
-                        const r = ~from;
+                        const r = ~to;
                         switch (promote_to) {
                             // zig fmt: off
                             PieceType.queen  => return Self.new(wp ^ from, wn, wb, wr, wq ^ to, wk, bp, bn & r, bb & r, br & r, bq & r, bk),
@@ -632,7 +685,11 @@ pub const Position = struct {
                             // zig fmt: on
                         }
                     },
-                    MoveTag.en_passant => unreachable,
+                    MoveTag.en_passant => {
+                        const r = ~bitboard.get_lsb_square(to).down_one().as_board();
+                        const m = (from | to);
+                        return Self.new(wp ^ m, wn, wb, wr, wq, wk, bp & r, bn, bb, br, bq, bk);
+                    },
                     MoveTag.capture => |piece_type| {
                         const r = ~to;
                         std.debug.assert(move.to & self.white == 0);
@@ -673,7 +730,7 @@ pub const Position = struct {
                         return Self.new(wp, wn, wb, wr, wq, wk, bp ^ (from | to), bn, bb, br, bq, bk);
                     },
                     MoveTag.promote => |promote_to| {
-                        const r = ~from;
+                        const r = ~to;
                         switch (promote_to) {
                             // zig fmt: off
                             PieceType.queen  => return Self.new(wp, wn & r, wb & r, wr & r, wq & r, wk, bp ^ from, bn, bb, br, bq ^ to, bk),
@@ -684,7 +741,11 @@ pub const Position = struct {
                             // zig fmt: on
                         }
                     },
-                    MoveTag.en_passant => unreachable,
+                    MoveTag.en_passant => {
+                        const r = ~bitboard.get_lsb_square(to).up_one().as_board();
+                        const m = (from | to);
+                        return Self.new(wp & r, wn, wb, wr, wq, wk, bp ^ m, bn, bb, br, bq, bk);
+                    },
                     MoveTag.capture => |piece_type| {
                         const r = ~to;
                         std.debug.assert(move.to & self.black == 0);
@@ -760,4 +821,94 @@ test "king unsafe squares" {
 
     const state = (try parse_fen("k6R/3r4/1p6/8/2n1K3/8/q7/3b4 w - - 0 1")).state;
     try expectEqual(@as(Bitboard, 0xbfe3b4d9d0bf70b), state.position.king_unsafe_squares(Color.white));
+}
+
+test "update castling rights" {
+    const expect = std.testing.expect;
+    var new_state: GameState = undefined;
+
+    const state = (try parse_fen("r3k2r/3N4/8/8/p7/8/8/R3K2R w KQkq - 0 1")).state;
+    try expect(state.can_castle_kingside(Color.white));
+    try expect(state.can_castle_queenside(Color.white));
+    try expect(state.can_castle_kingside(Color.black));
+    try expect(state.can_castle_queenside(Color.black));
+
+    // moving the right rook voids kingside castling rights for white
+    new_state = state.make_move(Color.white, Move {
+        .from = Square.H1.as_board(),
+        .to = Square.H2.as_board(),
+        .move_type = MoveType{ .quiet = PieceType.rook },
+    });
+    try expect(!new_state.can_castle_kingside(Color.white));
+    try expect(new_state.can_castle_queenside(Color.white));
+    try expect(new_state.can_castle_kingside(Color.black));
+    try expect(new_state.can_castle_queenside(Color.black));
+
+    // capturing with the left rook also voids castling rights
+    new_state = state.make_move(Color.white, Move {
+        .from = Square.A1.as_board(),
+        .to = Square.A4.as_board(),
+        .move_type = MoveType{ .capture = PieceType.rook },
+    });
+    try expect(new_state.can_castle_kingside(Color.white));
+    try expect(!new_state.can_castle_queenside(Color.white));
+    try expect(new_state.can_castle_kingside(Color.black));
+    try expect(new_state.can_castle_queenside(Color.black));
+
+    // moving the king voids castling rights on both sides
+    new_state = state.make_move(Color.white, Move {
+        .from = Square.E1.as_board(),
+        .to = Square.E2.as_board(),
+        .move_type = MoveType{ .quiet = PieceType.king },
+    });
+    try expect(!new_state.can_castle_kingside(Color.white));
+    try expect(!new_state.can_castle_queenside(Color.white));
+    try expect(new_state.can_castle_kingside(Color.black));
+    try expect(new_state.can_castle_queenside(Color.black));
+
+    // capturing (with the black king) does the same
+    new_state = state.make_move(Color.black, Move {
+        .from = Square.E8.as_board(),
+        .to = Square.D7.as_board(),
+        .move_type = MoveType{ .capture = PieceType.king },
+    });
+    try expect(new_state.can_castle_kingside(Color.white));
+    try expect(new_state.can_castle_queenside(Color.white));
+    try expect(!new_state.can_castle_kingside(Color.black));
+    try expect(!new_state.can_castle_queenside(Color.black));
+
+}
+
+test "en passant" {
+    const expectEqual = std.testing.expectEqual;
+    var new_state: GameState = undefined;
+
+    const state = (try parse_fen("k7/5p2/K7/8/5Pp1/8/8/8 w - f3 0 1")).state;
+    try expectEqual(Square.F3, state.board_rights.en_passant.?);
+
+    // next move resets en passant square
+    new_state = state.make_move(Color.black, Move {
+        .from = Square.G4.as_board(),
+        .to = Square.G3.as_board(),
+        .move_type = MoveType { .quiet = PieceType.pawn },
+    });
+    try expectEqual(null, new_state.board_rights.en_passant);
+
+    // next move might also create a new en passant square
+    new_state = state.make_move(Color.black, Move {
+        .from = Square.F7.as_board(),
+        .to = Square.F5.as_board(),
+        .move_type = MoveType.double_push,
+    });
+    try expectEqual(Square.F6, new_state.board_rights.en_passant.?);
+
+    // assure post-en passant positions are correct
+    // next move might also create a new en passant square
+    new_state = state.make_move(Color.black, Move {
+        .from = Square.G4.as_board(),
+        .to = Square.F3.as_board(),
+        .move_type = MoveType.en_passant,
+    });
+    try expectEqual(@as(Bitboard, 0x200000002000), new_state.position.pawns(Color.black));
+    try expectEqual(@as(Bitboard, 0), new_state.position.pawns(Color.white));
 }

@@ -36,7 +36,10 @@ pub fn perft(active_color: Color, state: GameState, allocator: Allocator, depth:
 }
 
 fn perft_recursive(comptime active_color: Color, state: GameState, allocator: Allocator, nodes: *u64, depth: u8) Allocator.Error!void {
-    if (depth == 0) return;
+    if (depth == 0) {
+        nodes.* += 1;
+        return;
+    }
 
     var move_list = ArrayList(Move).init(allocator);
     defer move_list.deinit();
@@ -44,7 +47,6 @@ fn perft_recursive(comptime active_color: Color, state: GameState, allocator: Al
     try generate_moves(active_color, state, &move_list);
 
     for (move_list.items) |move| {
-        nodes.* += 1;
         const new_state = state.make_move(active_color, move);
         const new_color = comptime active_color.other();
         try perft_recursive(new_color, new_state, allocator, nodes, depth - 1);

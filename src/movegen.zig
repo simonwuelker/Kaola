@@ -21,6 +21,7 @@ const Bitboard = bitboard.Bitboard;
 const bishop_attacks = bitboard.bishop_attacks;
 const pawn_attacks_left = bitboard.pawn_attacks_left;
 const pawn_attacks_right = bitboard.pawn_attacks_right;
+const pawn_attacks = bitboard.pawn_attacks;
 const rook_attacks = bitboard.rook_attacks;
 const get_lsb_square = bitboard.get_lsb_square;
 
@@ -443,6 +444,22 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
                 });
             },
         }
+    }
+
+    // en passant
+    if (state.board_rights.en_passant) |ep_square| {
+        // TODO: make sure king is not left in check
+        // https://lichess.org/analysis/fromPosition/6k1/8/KPp4R/8/8/8/8/8_w_-_c7_0_1
+        var ep_attackers = pawn_attacks(them, ep_square.as_board()) & our_pawns;
+        while (ep_attackers != 0): (pop_ls1b(&ep_attackers)) {
+            const to = get_lsb_square(ep_attackers);
+            try move_list.append(Move {
+                .from = ep_square.as_board(),
+                .to = to.as_board(),
+                .move_type = MoveType.en_passant,
+            });
+        }
+
     }
 }
 
