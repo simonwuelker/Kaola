@@ -687,15 +687,9 @@ pub const Position = struct {
                     MoveTag.en_passant => unreachable,
                     MoveTag.capture => |piece_type| {
                         const r = ~to;
-                        if (move.to & self.black != 0) {
-                            bitboard.print_bitboard(move.from, "from");
-                            bitboard.print_bitboard(to, "to");
-                            bitboard.print_bitboard(self.black, "black");
-                        }
                         std.debug.assert(move.to & self.black == 0);
-                        std.debug.assert(to & bk == 0);
+                        std.debug.assert(to & wk == 0);
                         const m = (from | to);
-                        std.debug.assert(m & wk == 0);
                         switch (piece_type) {
                             // zig fmt: off
                             PieceType.pawn   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp ^ m, bn, bb, br, bq, bk),

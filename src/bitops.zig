@@ -18,12 +18,12 @@ pub fn has_pext() bool {
     return builtin.cpu.arch == Cpu.Arch.x86_64 and x86.featureSetHas(builtin.cpu.features, x86.Feature.bmi2);
 }
 
-pub fn pext(src: usize, mask: usize) usize {
+pub fn pext(src: u64, mask: u64) u64 {
     std.debug.assert(has_pext());
-    return asm ("pext %[src], %[mask], %[ret]"
-        :[ret] "=r" (-> usize)
-        :[src] "r" (src),
-         [mask] "r" (mask),
+    return asm ("pext %[mask], %[src], %[ret]"
+        :[ret] "=r" (-> u64)
+        :[mask] "r" (mask),
+         [src] "r" (src),
 
     );
 }
