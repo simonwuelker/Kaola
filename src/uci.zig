@@ -178,8 +178,6 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
         log_command(false, input);
         if (input.len == 0) continue;
 
-        // var reader = fixedBufferStream(input).reader();
-        // const command = (try read_word(@TypeOf(reader), reader)) orelse continue;
         var words = std.mem.split(u8, input, " ");
         const command = words.next().?;
 

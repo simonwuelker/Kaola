@@ -51,8 +51,6 @@ pub fn main() !void {
 
     try init();
 
-
-
     // will probably be overwritten by "ucinewgame" but it prevents undefined behaviour
     // just define a default position
     var active_color = Color.white;
@@ -76,15 +74,15 @@ pub fn main() !void {
                 state = game.state;
             },
             GuiCommand.go => {
-                const best_move = try searcher.search(active_color, state, 3, allocator);
+                const best_move = try searcher.search(active_color, state, 4, allocator);
                 try send_command(EngineCommand{ .bestmove = best_move }, allocator);
             },
             GuiCommand.stop => {},
             GuiCommand.board => state.print(),
             GuiCommand.eval => {
                 switch (active_color) {
-                    Color.white => std.debug.print("{d}\n", .{pesto.evaluate(Color.white, state.position)}),
-                    Color.black => std.debug.print("{d}\n", .{pesto.evaluate(Color.black, state.position)}),
+                    Color.white => std.debug.print("{d} (from white's perspective)\n", .{pesto.evaluate(Color.white, state.position)}),
+                    Color.black => std.debug.print("{d} (from black's perspective)\n", .{pesto.evaluate(Color.black, state.position)}),
                 }
             },
             GuiCommand.moves => {

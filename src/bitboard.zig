@@ -3,9 +3,10 @@
 
 const std = @import("std");
 const bitops = @import("bitops.zig");
-const board_module = @import("board.zig");
-const Square = board_module.Square;
-const Color = board_module.Color;
+const board = @import("board.zig");
+const Square = board.Square;
+const Color = board.Color;
+const SquareIterator = board.SquareIterator;
 const rand = @import("rand.zig");
 
 const has_pext = bitops.has_pext;
@@ -235,14 +236,14 @@ fn init_slider_magics(comptime slider: Slider) void {
     }
 }
 
-pub fn print_bitboard(board: Bitboard, title: []const u8) void {
-    std.debug.print("\n==> {s}(0x{x})\n", .{title, board});
+pub fn print_bitboard(bitboard: Bitboard, title: []const u8) void {
+    std.debug.print("\n==> {s}(0x{x})\n", .{title, bitboard});
     var i: u6 = 0;
     while (i < 8) : (i += 1) {
         std.debug.print("{d}  ", .{8 - i});
         var j: u6 = 0;
         while (j < 8) : (j += 1) {
-            if (board >> (i * 8 + j) & 1 != 0) {
+            if (bitboard >> (i * 8 + j) & 1 != 0) {
                 std.debug.print("1 ", .{});
             } else {
                 std.debug.print(". ", .{});
@@ -270,44 +271,44 @@ fn bitboard_distance_to_edge(square: Square, shift: i5) u3 {
 
 /// Get the index of the least significant bit in a bitboard.
 /// Causes undefined behaviour if the bitboard has no bit set.
-pub inline fn get_lsb_square(board: Bitboard) Square {
-    std.debug.assert(board != 0);
-    return @intToEnum(Square, @ctz(board));
+pub inline fn get_lsb_square(bitboard: Bitboard) Square {
+    std.debug.assert(bitboard != 0);
+    return @intToEnum(Square, @ctz(bitboard));
 }
 
 /// Compute the left attacks for a set of pawns
 /// (Left from white's POV)
-pub inline fn pawn_attacks_left(comptime color: Color, board: Bitboard) Bitboard {
+pub inline fn pawn_attacks_left(comptime color: Color, bitboard: Bitboard) Bitboard {
     if (color == Color.white) {
-        return (board & ~FILE_A) >> 9;
+        return (bitboard & ~FILE_A) >> 9;
     } else {
-        return (board & ~FILE_A) << 7;
+        return (bitboard & ~FILE_A) << 7;
     }
 }
 
 /// Compute the right attacks for a set of pawns
 /// (Left from white's POV)
-pub inline fn pawn_attacks_right(comptime color: Color, board: Bitboard) Bitboard {
+pub inline fn pawn_attacks_right(comptime color: Color, bitboard: Bitboard) Bitboard {
     if (color == Color.white) {
-        return (board & ~FILE_H) >> 7;
+        return (bitboard & ~FILE_H) >> 7;
     } else {
-        return (board & ~FILE_H) << 9;
+        return (bitboard & ~FILE_H) << 9;
     }
 }
 
-pub inline fn pawn_attacks(comptime color: Color, board: Bitboard) Bitboard {
-    return pawn_attacks_left(color, board) | pawn_attacks_right(color, board);
+pub inline fn pawn_attacks(comptime color: Color, bitboard: Bitboard) Bitboard {
+    return pawn_attacks_left(color, bitboard) | pawn_attacks_right(color, bitboard);
 }
 
-pub fn king_attacks(board: Bitboard) Bitboard {
-    return ((board & ~FILE_A) >> 1) // left
-    | ((board & ~FILE_H) << 1) // right
-    | (board << 8) // down
-    | (board >> 8) // up
-    | ((board & ~FILE_A) >> 9) // up left
-    | ((board & ~FILE_H) >> 7) // up right
-    | ((board & ~FILE_H) << 9) // down right
-    | ((board & ~FILE_A) << 7); // down left
+pub fn king_attacks(bitboard: Bitboard) Bitboard {
+    return ((bitboard & ~FILE_A) >> 1) // left
+    | ((bitboard & ~FILE_H) << 1) // right
+    | (bitboard << 8) // down
+    | (bitboard >> 8) // up
+    | ((bitboard & ~FILE_A) >> 9) // up left
+    | ((bitboard & ~FILE_H) >> 7) // up right
+    | ((bitboard & ~FILE_H) << 9) // down right
+    | ((bitboard & ~FILE_A) << 7); // down left
 }
 
 pub fn knight_attack(square: Square) Bitboard {
@@ -315,15 +316,15 @@ pub fn knight_attack(square: Square) Bitboard {
 }
 
 /// Take a bitboard of knights and produce a bitboard marking their attacks
-pub fn knight_attacks(board: Bitboard) Bitboard {
-    return ((board & ~FILE_A) >> 17) // up up left
-    | ((board & ~FILE_H) >> 15) // up up right
-    | ((board & ~(FILE_G | FILE_H)) >> 6) // up right right
-    | ((board & ~(FILE_G | FILE_H)) << 10) // down right right
-    | ((board & ~FILE_H) << 17) // down down right
-    | ((board & ~FILE_A) << 15) // down down left
-    | ((board & ~(FILE_A | FILE_B)) << 6) // down left left
-    | ((board & ~(FILE_A | FILE_B)) >> 10); // up left left
+pub fn knight_attacks(bitboard: Bitboard) Bitboard {
+    return ((bitboard & ~FILE_A) >> 17) // up up left
+    | ((bitboard & ~FILE_H) >> 15) // up up right
+    | ((bitboard & ~(FILE_G | FILE_H)) >> 6) // up right right
+    | ((bitboard & ~(FILE_G | FILE_H)) << 10) // down right right
+    | ((bitboard & ~FILE_H) << 17) // down down right
+    | ((bitboard & ~FILE_A) << 15) // down down left
+    | ((bitboard & ~(FILE_A | FILE_B)) << 6) // down left left
+    | ((bitboard & ~(FILE_A | FILE_B)) >> 10); // up left left
 }
 
 pub fn bishop_attacks(square: Square, blocked: Bitboard) Bitboard {
@@ -377,29 +378,6 @@ pub inline fn path_between_squares(from: Square, to: Square) Bitboard {
     return PATH_BETWEEN_SQUARES[@enumToInt(from)][@enumToInt(to)];
 }
 
-/// Iterator over all 64 squares on a chess board
-pub const SquareIterator = struct {
-    current_square: u7,
-
-    const Self = @This();
-
-    pub fn new() Self {
-        return Self {
-            .current_square = 0,
-        };
-    }
-
-    pub fn next(self: *Self) ?Square {
-        if (self.current_square == 64) {
-            return null;
-        } else {
-            const square = @intToEnum(Square, self.current_square);
-            self.current_square += 1;
-            return square;
-        }
-
-    }
-};
 
 test "rook attacks" {
     const expectEqual = std.testing.expectEqual;

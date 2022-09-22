@@ -413,6 +413,18 @@ pub const BoardRights = struct {
                     }
                 }
             },
+            MoveType.castle => |_| {
+                switch (color) {
+                    Color.white => {
+                        white_kingside = false;
+                        white_queenside = false;
+                    },
+                    Color.black => {
+                        black_kingside = false;
+                        black_queenside = false;
+                    },
+                }
+            },
             MoveType.capture => |piece_type| {
                 if (piece_type == PieceType.king) {
                     switch (color) {
@@ -649,6 +661,7 @@ pub const Position = struct {
     }
 
     pub fn make_move(self: *const Self, comptime color: Color, move: Move) Position {
+        std.debug.assert(self.is_ok());
         const wp = self.white_pawns;
         const wn = self.white_knights;
         const wb = self.white_bishops;
@@ -664,6 +677,7 @@ pub const Position = struct {
 
         const from = move.from;
         const to = move.to;
+
         switch (color) {
             Color.white => {
                 switch (move.move_type) {
@@ -753,12 +767,12 @@ pub const Position = struct {
                         const m = (from | to);
                         switch (piece_type) {
                             // zig fmt: off
-                            PieceType.pawn   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp ^ m, bn, bb, br, bq, bk),
-                            PieceType.knight => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn ^ m, bb, br, bq, bk),
-                            PieceType.bishop => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb ^ m, br, bq, bk),
-                            PieceType.rook   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb, br ^ m, bq, bk),
-                            PieceType.queen  => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb, br, bq ^ m, bk),
-                            PieceType.king   => return Self.new(wp & r, wn & r, wb, wr & r, wq & r, wk, bp, bn, bb, br, bq, bk ^ m),
+                            PieceType.pawn   => return Self.new(wp & r, wn & r, wb & r, wr & r, wq & r, wk, bp ^ m, bn, bb, br, bq, bk),
+                            PieceType.knight => return Self.new(wp & r, wn & r, wb & r, wr & r, wq & r, wk, bp, bn ^ m, bb, br, bq, bk),
+                            PieceType.bishop => return Self.new(wp & r, wn & r, wb & r, wr & r, wq & r, wk, bp, bn, bb ^ m, br, bq, bk),
+                            PieceType.rook   => return Self.new(wp & r, wn & r, wb & r, wr & r, wq & r, wk, bp, bn, bb, br ^ m, bq, bk),
+                            PieceType.queen  => return Self.new(wp & r, wn & r, wb & r, wr & r, wq & r, wk, bp, bn, bb, br, bq ^ m, bk),
+                            PieceType.king   => return Self.new(wp & r, wn & r, wb & r, wr & r, wq & r, wk, bp, bn, bb, br, bq, bk ^ m),
                             // zig fmt: on
                         }
                     },
@@ -813,6 +827,59 @@ pub const Position = struct {
         // king
         attacked |= bitboard.king_attacks(self.king(them));
         return attacked;
+    }
+
+    /// perform sanity checks for debugging
+    fn is_ok(self: *const Self) bool {
+        var squares = SquareIterator.new();
+        if (self.white & self.black != 0 or self.black | self.white != self.occupied) {
+            std.debug.print("occupancy error\n", .{});
+            return false;
+        }
+        while (squares.next()) |square| {
+            const index = @enumToInt(square);
+            const pieces_on_that_field = 
+                ((self.white_pawns >> index) & 1) + 
+                ((self.white_knights >> index) & 1) + 
+                ((self.white_bishops >> index) & 1) + 
+                ((self.white_rooks >> index) & 1) + 
+                ((self.white_queens >> index) & 1) + 
+                ((self.white_king >> index) & 1) + 
+                ((self.black_pawns >> index) & 1) + 
+                ((self.black_knights >> index) & 1) + 
+                ((self.black_bishops >> index) & 1) + 
+                ((self.black_rooks >> index) & 1) + 
+                ((self.black_queens >> index) & 1) + 
+                ((self.black_king >> index) & 1);
+            if (pieces_on_that_field > 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+/// Iterator over all 64 squares on a chess board
+pub const SquareIterator = struct {
+    current_square: u7,
+
+    const Self = @This();
+
+    pub fn new() Self {
+        return Self {
+            .current_square = 0,
+        };
+    }
+
+    pub fn next(self: *Self) ?Square {
+        if (self.current_square == 64) {
+            return null;
+        } else {
+            const square = @intToEnum(Square, self.current_square);
+            self.current_square += 1;
+            return square;
+        }
+
     }
 };
 

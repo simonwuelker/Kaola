@@ -1,6 +1,8 @@
 /// Evaluates a board position using the evaluation function from PeSTO
 /// https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function
+
 const board = @import("board.zig");
+const SquareIterator = board.SquareIterator;
 const Position = board.Position;
 const Color = board.Color;
 const pop_ls1b = @import("bitops.zig").pop_ls1b;
@@ -133,6 +135,7 @@ const MIDGAME_KING_TABLE = [64]i32{
 
 const ENDGAME_KING_TABLE = [64]i32{ -74, -35, -18, -18, -11, 15, 4, -17, -12, 17, 14, 17, 17, 38, 23, 11, 10, 17, 23, 15, 20, 45, 44, 13, -8, 22, 24, 27, 26, 33, 26, 3, -18, -4, 21, 24, 27, 23, 9, -11, -19, -3, 11, 21, 23, 16, 7, -9, -27, -11, 4, 13, 14, 4, -5, -17, -53, -34, -21, -11, -28, -14, -24, -43 };
 
+// pawns, knights, bishops, rooks, queens, kings
 const MIDGAME_VALUE = [6]i32{ 82, 337, 365, 477, 1025, 0 };
 const ENDGAME_VALUE = [6]i32{ 94, 281, 297, 512, 936, 0 };
 
@@ -161,13 +164,14 @@ var endgame_table: [2][6][64]i32 = undefined;
 
 pub fn init_tables() void {
     var piece: u5 = 0;
-    while (piece < 6) : (piece += 2) {
-        var square: u7 = 0;
-        while (square < 64) : (square += 1) {
-            midgame_table[0][piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][square];
-            endgame_table[0][piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][square];
-            midgame_table[1][piece][square] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][flip(square)];
-            endgame_table[1][piece][square] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][flip(square)];
+    while (piece < 6) : (piece += 1) {
+        var squares = SquareIterator.new();
+        while (squares.next()) |square| {
+            const index = @enumToInt(square);
+            midgame_table[0][piece][index] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][index];
+            endgame_table[0][piece][index] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][index];
+            midgame_table[1][piece][index] = MIDGAME_VALUE[piece] + MIDGAME_TABLE[piece][flip(index)];
+            endgame_table[1][piece][index] = ENDGAME_VALUE[piece] + ENDGAME_TABLE[piece][flip(index)];
         }
     }
 }
@@ -200,6 +204,7 @@ pub fn evaluate(comptime active_color: Color, position: Position) i32 {
 
     const midgamescore = midgame[us] - midgame[them];
     const endgamescore = endgame[us] - endgame[them];
+
     return @divTrunc(midgamescore * midgamephase + endgamescore * endgamephase, 24);
 }
 
