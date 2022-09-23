@@ -110,13 +110,13 @@ pub fn main() !void {
     }
 }
 
-pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
-    @setCold(true);
-    const stderr = std.io.getStdErr().writer();
-    stderr.print("The engine panicked, this is a bug.\nPlease file an issue at https://github.com/Wuelle/zigchess, including the debug information below.\nThanks ^_^\n", .{}) catch std.os.abort();
-    const first_trace_addr = @returnAddress();
-    std.debug.panicImpl(error_return_trace, first_trace_addr, msg);
-}
+// pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
+//     @setCold(true);
+//     const stderr = std.io.getStdErr().writer();
+//     stderr.print("The engine panicked, this is a bug.\nPlease file an issue at https://github.com/Wuelle/zigchess, including the debug information below.\nThanks ^_^\n", .{}) catch std.os.abort();
+//     const first_trace_addr = @returnAddress();
+//     std.debug.panicImpl(error_return_trace, first_trace_addr, msg);
+// }
 
 test {
     try init(); // setup for tests

@@ -248,10 +248,10 @@ pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayLis
         }
     }
 
-    var pinned_rooks = straight_sliders & pinmask.diagonal;
+    var pinned_rooks = straight_sliders & pinmask.straight;
     while (pinned_rooks != 0) : (pop_ls1b(&pinned_rooks)) {
         const square = get_lsb_square(pinned_rooks);
-        const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask & pinmask.diagonal;
+        const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask & pinmask.straight;
         const from = square.as_board();
 
         if (from & pos.rooks(us) != 0) {
@@ -452,10 +452,10 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
         // https://lichess.org/analysis/fromPosition/6k1/8/KPp4R/8/8/8/8/8_w_-_c7_0_1
         var ep_attackers = pawn_attacks(them, ep_square.as_board()) & our_pawns;
         while (ep_attackers != 0): (pop_ls1b(&ep_attackers)) {
-            const to = get_lsb_square(ep_attackers);
+            const from = get_lsb_square(ep_attackers);
             try move_list.append(Move {
-                .from = ep_square.as_board(),
-                .to = to.as_board(),
+                .from = from.as_board(),
+                .to = ep_square.as_board(),
                 .move_type = MoveType.en_passant,
             });
         }
