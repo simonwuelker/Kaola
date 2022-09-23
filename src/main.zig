@@ -59,7 +59,7 @@ pub fn main() !void {
         const command = try uci.next_command(allocator);
         try switch (command) {
             GuiCommand.uci => {
-                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Mephisto" } }, allocator);
+                try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Kaola" } }, allocator);
                 try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } }, allocator);
                 try send_command(EngineCommand.uciok, allocator);
             },
@@ -94,7 +94,6 @@ pub fn main() !void {
                     Color.black => try generate_moves(Color.black, state, &move_list),
                 }
                 
-
                 for (move_list.items) |move| {
                     const move_name = try move.to_str(allocator);
                     std.debug.print("{s}\n", .{move_name});
@@ -110,6 +109,7 @@ pub fn main() !void {
     }
 }
 
+// Uncommenting this causes an ICE, wait until https://github.com/ziglang/zig/issues/12935 is closed
 // pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
 //     @setCold(true);
 //     const stderr = std.io.getStdErr().writer();

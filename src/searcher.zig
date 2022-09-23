@@ -22,18 +22,21 @@ pub fn search(active_color: Color, state: GameState, depth: u8, allocator: Alloc
     }
 }
 
+// for debugging, will be removed later
 fn log_move(move: Move, depth: u8, allocator: Allocator) void {
     _ = move;
     _ = depth;
     _ = allocator;
-    // var cnt: u8 = 0;
-    // while (cnt < 4 - depth): (cnt += 1) {
-    //     std.debug.print(" ", .{});
+    // if (depth == 2) {
+    //     var cnt: u8 = 0;
+    //     while (cnt < 4 - depth): (cnt += 1) {
+    //         std.debug.print(" ", .{});
+    //     }
+    //     std.debug.print("({d})", .{depth});
+    //     const move_name = move.to_str(allocator) catch unreachable;
+    //     std.debug.print(" {s}\n", .{move_name});
+    //     allocator.free(move_name);
     // }
-    // std.debug.print("({d})", .{depth});
-    // const move_name = move.to_str(allocator) catch unreachable;
-    // std.debug.print(" {s}\n", .{move_name});
-    // allocator.free(move_name);
 }
 
 fn alpha_beta_search(comptime active_color: Color, state: GameState, depth: u8, allocator: Allocator) Allocator.Error!Move {
@@ -51,7 +54,6 @@ fn alpha_beta_search(comptime active_color: Color, state: GameState, depth: u8, 
         const new_state = state.make_move(active_color, move_to_consider);
         const new_color = comptime active_color.other();
         const score = try min_value(new_color, active_color, new_state, depth - 1, allocator, MIN_SCORE, MAX_SCORE);
-        // std.debug.print("the score is {d}\n", .{score});
 
         if (score > best_score or !found_a_move) {
             best_move = move_to_consider;

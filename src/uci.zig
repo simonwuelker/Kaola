@@ -155,6 +155,8 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
         EngineCommandTag.report_perft => |report| {
             const elapsed_nanos = @intToFloat(f64, report.time_elapsed);
             const elapsed_seconds = elapsed_nanos / 1_000_000_000;
+
+            _ = try std.fmt.format(stdout, "{d:.3}s elapsed\n", .{elapsed_seconds});
             _ = try std.fmt.format(stdout, "{} nodes explored\n", .{report.nodes});
 
             const nps = @intToFloat(f64, report.nodes) / elapsed_seconds;
