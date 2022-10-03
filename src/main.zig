@@ -61,6 +61,10 @@ pub fn main() !void {
             GuiCommand.uci => {
                 try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Kaola" } }, allocator);
                 try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } }, allocator);
+                try send_command(EngineCommand{ .option = .{ 
+                    .name = "Hash", 
+                    .option_type = "spin" } 
+                }, allocator);
                 try send_command(EngineCommand.uciok, allocator);
             },
             GuiCommand.isready => send_command(EngineCommand.readyok, allocator),

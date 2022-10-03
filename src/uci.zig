@@ -96,6 +96,7 @@ pub const EngineCommandTag = enum(u8) {
     readyok,
     bestmove,
     info,
+    option,
     report_perft,
 };
 
@@ -132,6 +133,14 @@ pub const GuiCommand = union(GuiCommandTag) {
 pub const EngineCommand = union(EngineCommandTag) {
     uciok: void,
     id: struct { key: []const u8, value: []const u8 },
+    option: struct { 
+        name: []const u8, 
+        option_type: []const u8, 
+        default: ?[]const u8,
+        min: ?[]const u8,
+        max: ?[]const u8,
+        option_var: ?[]const u8,
+    },
     readyok: void,
     bestmove: Move,
     info: []const u8,
@@ -151,6 +160,22 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
         },
         EngineCommandTag.info => |info| {
             _ = try std.fmt.format(stdout, "info string {s}\n", .{info});
+        },
+        EngineCommandTag.option => |option| {
+            _ = try std.fmt.format(stdout, "option name {s} type {s}", .{option.name, option.option_type});
+            if (option.default) |default| {
+                _ = try std.fmt.format(stdout, "default {s}", .{default});
+            }
+            if (option.min) |min| {
+                _ = try std.fmt.format(stdout, "min {s}", .{min});
+            }
+            if (option.max) |max| {
+                _ = try std.fmt.format(stdout, "max {s}", .{max});
+            }
+            if (option.option_var) |option_var| {
+                _ = try std.fmt.format(stdout, "var {s}", .{option_var});
+            }
+
         },
         EngineCommandTag.report_perft => |report| {
             const elapsed_nanos = @intToFloat(f64, report.time_elapsed);
