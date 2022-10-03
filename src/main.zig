@@ -38,7 +38,7 @@ pub fn init() !void {
 pub fn log(comptime message_level: Level, comptime scope: anytype, comptime format: []const u8, args: anytype) void {
     _ = scope;
     _ = message_level;
-    const file = std.fs.cwd().openFile(LOG_FILE, .{.mode = OpenMode.write_only}) catch unreachable;
+    const file = std.fs.cwd().openFile(LOG_FILE, .{ .mode = OpenMode.write_only }) catch unreachable;
     file.seekFromEnd(0) catch unreachable;
     _ = std.fmt.format(file.writer(), format, args) catch unreachable;
     file.close();
@@ -61,10 +61,7 @@ pub fn main() !void {
             GuiCommand.uci => {
                 try send_command(EngineCommand{ .id = .{ .key = "name", .value = "Kaola" } }, allocator);
                 try send_command(EngineCommand{ .id = .{ .key = "author", .value = "Alaska" } }, allocator);
-                try send_command(EngineCommand{ .option = .{ 
-                    .name = "Hash", 
-                    .option_type = "spin" } 
-                }, allocator);
+                try send_command(EngineCommand{ .option = .{ .name = "Hash", .option_type = "spin", .default = "4096" } }, allocator);
                 try send_command(EngineCommand.uciok, allocator);
             },
             GuiCommand.isready => send_command(EngineCommand.readyok, allocator),
@@ -97,7 +94,7 @@ pub fn main() !void {
                     Color.white => try generate_moves(Color.white, state, &move_list),
                     Color.black => try generate_moves(Color.black, state, &move_list),
                 }
-                
+
                 for (move_list.items) |move| {
                     const move_name = try move.to_str(allocator);
                     std.debug.print("{s}\n", .{move_name});
@@ -114,12 +111,11 @@ pub fn main() !void {
 }
 
 // Uncommenting this causes an ICE, wait until https://github.com/ziglang/zig/issues/12935 is closed
-// pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
+// pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace) noreturn {
 //     @setCold(true);
 //     const stderr = std.io.getStdErr().writer();
 //     stderr.print("The engine panicked, this is a bug.\nPlease file an issue at https://github.com/Wuelle/zigchess, including the debug information below.\nThanks ^_^\n", .{}) catch std.os.abort();
-//     const first_trace_addr = @returnAddress();
-//     std.debug.panicImpl(error_return_trace, first_trace_addr, msg);
+//     std.debug.panicImpl(trace, @returnAddress(), msg);
 // }
 
 test {

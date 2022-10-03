@@ -24,7 +24,7 @@ const UCI_COMMAND_MAX_LENGTH = 1024;
 fn u32_from_str(str: []const u8) u32 {
     var x: u32 = 0;
 
-    for(str) |c| {
+    for (str) |c| {
         std.debug.assert('0' <= c);
         std.debug.assert(c <= '9');
         x *= 10;
@@ -41,12 +41,14 @@ pub fn read_word(comptime Reader: type, src: Reader) !?[]const u8 {
     // skip any number of spaces
     var peekable = peekStream(1, src);
     var b = try peekable.reader().readByte();
-    while (b == ' ') {b = try peekable.reader().readByte();}
+    while (b == ' ') {
+        b = try peekable.reader().readByte();
+    }
     try peekable.putBackByte(b);
     return word;
 }
 
-const FenError = error {
+const FenError = error{
     missing_field,
 };
 
@@ -68,8 +70,6 @@ pub fn read_fen(comptime Reader: type, src: Reader, allocator: Allocator) ![]con
         (try read_word(Reader, src)) orelse return FenError.missing_field,
     });
 }
-
-
 
 /// Note that these are not all uci commands, just the ones
 /// that cannot be trivially handled by next_command
@@ -133,13 +133,13 @@ pub const GuiCommand = union(GuiCommandTag) {
 pub const EngineCommand = union(EngineCommandTag) {
     uciok: void,
     id: struct { key: []const u8, value: []const u8 },
-    option: struct { 
-        name: []const u8, 
-        option_type: []const u8, 
-        default: ?[]const u8,
-        min: ?[]const u8,
-        max: ?[]const u8,
-        option_var: ?[]const u8,
+    option: struct {
+        name: []const u8,
+        option_type: []const u8,
+        default: ?[]const u8 = null,
+        min: ?[]const u8 = null,
+        max: ?[]const u8 = null,
+        option_var: ?[]const u8 = null,
     },
     readyok: void,
     bestmove: Move,
@@ -162,7 +162,7 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
             _ = try std.fmt.format(stdout, "info string {s}\n", .{info});
         },
         EngineCommandTag.option => |option| {
-            _ = try std.fmt.format(stdout, "option name {s} type {s}", .{option.name, option.option_type});
+            _ = try std.fmt.format(stdout, "option name {s} type {s}", .{ option.name, option.option_type });
             if (option.default) |default| {
                 _ = try std.fmt.format(stdout, "default {s}", .{default});
             }
@@ -175,7 +175,6 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
             if (option.option_var) |option_var| {
                 _ = try std.fmt.format(stdout, "var {s}", .{option_var});
             }
-
         },
         EngineCommandTag.report_perft => |report| {
             const elapsed_nanos = @intToFloat(f64, report.time_elapsed);
@@ -300,7 +299,6 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
                 if (remaining.len != 0) {
                     maybe_moves_str = remaining;
                 }
-
             } else if (std.mem.eql(u8, pos_variant, "startpos")) {
                 active_color = Color.white;
                 state = GameState.initial();
@@ -309,7 +307,9 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
                         maybe_moves_str = words.rest();
                     }
                 }
-            } else { continue; }
+            } else {
+                continue;
+            }
 
             if (maybe_moves_str) |moves_str| {
                 var moves = std.mem.split(u8, std.mem.trim(u8, moves_str, " "), " ");

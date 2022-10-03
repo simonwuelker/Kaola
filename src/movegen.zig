@@ -25,13 +25,6 @@ const pawn_attacks = bitboard.pawn_attacks;
 const rook_attacks = bitboard.rook_attacks;
 const get_lsb_square = bitboard.get_lsb_square;
 
-
-/// Bit mask for masking off the third rank
-const THIRD_RANK: Bitboard = 0x0000FF0000000000;
-/// Bit mask for masking off the sixth rank
-const SIXTH_RANK: Bitboard = 0x0000000000FF0000;
-
-
 /// Bitmask for detecting pieces that block white from queenside castling
 const WHITE_QUEENSIDE = 0xe00000000000000;
 /// Bitmask for detecting pieces that block white from kingside castling
@@ -329,7 +322,7 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
     const unpinned_pawns = our_pawns & ~pinmask.both;
     var pinned_pawn_moves: Bitboard = undefined;
     var unpinned_pawn_moves: Bitboard = undefined;
-    switch(us) {
+    switch (us) {
         Color.white => {
             pinned_pawn_moves = straight_pinned_pawns >> 8 & pinmask.straight & empty; // needed later for pawn pushes
             unpinned_pawn_moves = unpinned_pawns >> 8 & empty;
@@ -345,7 +338,7 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
     legal_pawn_moves &= checkmask; // prune moves that leave the king in check
     while (legal_pawn_moves != 0) : (pop_ls1b(&legal_pawn_moves)) {
         const to = get_lsb_square(legal_pawn_moves);
-        switch(us) {
+        switch (us) {
             Color.white => {
                 try move_list.append(Move{
                     .from = to.down_one().as_board(),
@@ -367,7 +360,7 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
     // no pinmask required here - if we were able to move then we are also able to push ^^
     switch (us) {
         Color.white => {
-            var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & THIRD_RANK) >> 8 & empty & checkmask;
+            var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & bitboard.RANK_3) >> 8 & empty & checkmask;
             while (pawn_pushes != 0) : (pop_ls1b(&pawn_pushes)) {
                 const to = get_lsb_square(pawn_pushes);
                 try move_list.append(Move{
@@ -378,7 +371,7 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
             }
         },
         Color.black => {
-            var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & SIXTH_RANK) << 8 & empty & checkmask;
+            var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & bitboard.RANK_6) << 8 & empty & checkmask;
             while (pawn_pushes != 0) : (pop_ls1b(&pawn_pushes)) {
                 const to = get_lsb_square(pawn_pushes);
                 try move_list.append(Move{
@@ -408,7 +401,7 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
 
     while (left_captures != 0) : (pop_ls1b(&left_captures)) {
         const to = get_lsb_square(left_captures);
-        switch(us) {
+        switch (us) {
             Color.white => {
                 try move_list.append(Move{
                     .from = to.down_right().as_board(),
@@ -428,7 +421,7 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
 
     while (right_captures != 0) : (pop_ls1b(&right_captures)) {
         const to = get_lsb_square(right_captures);
-        switch(us) {
+        switch (us) {
             Color.white => {
                 try move_list.append(Move{
                     .from = to.down_left().as_board(),
@@ -448,18 +441,37 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
 
     // en passant
     if (state.board_rights.en_passant) |ep_square| {
-        // TODO: make sure king is not left in check
-        // https://lichess.org/analysis/fromPosition/6k1/8/KPp4R/8/8/8/8/8_w_-_c7_0_1
-        var ep_attackers = pawn_attacks(them, ep_square.as_board()) & our_pawns;
-        while (ep_attackers != 0): (pop_ls1b(&ep_attackers)) {
-            const from = get_lsb_square(ep_attackers);
-            try move_list.append(Move {
-                .from = from.as_board(),
-                .to = ep_square.as_board(),
-                .move_type = MoveType.en_passant,
-            });
-        }
+        // straight pinned pawns can never take en-passant
+        var ep_attackers = pawn_attacks(them, ep_square.as_board()) & our_pawns & ~pinmask.straight;
 
+        while (ep_attackers != 0) : (pop_ls1b(&ep_attackers)) {
+            const from = get_lsb_square(ep_attackers).as_board();
+
+            if (from & pinmask.diagonal == 0 or (from & pinmask.diagonal != 0 and ep_square.as_board() & pinmask.diagonal != 0)) {
+                // make sure king is not left in check
+                const straight_sliders = state.position.rooks(them) | state.position.queens(them);
+                const king = bitboard.get_lsb_square(state.position.king(us));
+                switch (us) {
+                    Color.white => {
+                        const mask = from | ep_square.down_one().as_board();
+                        if (rook_attacks(king, state.position.occupied ^ mask) & straight_sliders != 0) {
+                            break;
+                        }
+                    },
+                    Color.black => {
+                        const mask = from | ep_square.down_one().as_board();
+                        if (rook_attacks(king, state.position.occupied ^ mask) & straight_sliders != 0) {
+                            break;
+                        }
+                    },
+                }
+                try move_list.append(Move{
+                    .from = from,
+                    .to = ep_square.as_board(),
+                    .move_type = MoveType.en_passant,
+                });
+            }
+        }
     }
 }
 
@@ -492,4 +504,52 @@ test "checkmask generation" {
     // No check, all moves allowed
     const no_check = (try parse_fen("8/8/8/3K4/8/8/8/8 w - - 0 1")).state;
     try expectEqual(~@as(Bitboard, 0), generate_checkmask(Color.white, no_check.position));
+}
+
+test "en passant" {
+    const test_allocator = std.testing.allocator;
+    const expect = std.testing.expect;
+    const parse_fen = board.parse_fen;
+
+    var move_list = ArrayList(Move).init(test_allocator);
+    defer move_list.deinit();
+
+    // https://lichess.org/analysis/fromPosition/1K5k/8/8/1Pp5/8/8/8/1r6_w_-_c6_1_1
+    // white cannot take en-passant because the pawn is pinned to the king
+    const straight_pin = (try parse_fen("1K5k/8/8/1Pp5/8/8/8/1r6 w - c6 1 1")).state;
+
+    try generate_moves(Color.white, straight_pin, &move_list);
+
+    for (move_list.items) |move| {
+        try expect(move.move_type != MoveType.en_passant);
+    }
+
+    move_list.clearAndFree();
+
+    // https://lichess.org/analysis/fromPosition/4q2k/8/8/1Pp5/K7/8/8/8_w_-_c6_1_1
+    // white can take, despite the pawn being pinned
+    const diagonal_pin = (try parse_fen("4q2k/8/8/1Pp5/K7/8/8/8 w - c6 1 1")).state;
+
+    try generate_moves(Color.white, diagonal_pin, &move_list);
+
+    var found_en_passant = false;
+    for (move_list.items) |move| {
+        if (move.move_type == MoveType.en_passant) {
+            found_en_passant = true;
+            break;
+        }
+    }
+    try expect(found_en_passant);
+
+    move_list.clearAndFree();
+
+    // https://lichess.org/analysis/standard/7k/8/8/KPp4r/8/8/8/8_w_-_c6_1_1
+    // white cannot take en-passant because that would leave the king check
+    const tricky_pin = (try parse_fen("7k/8/8/KPp4r/8/8/8/8 w - c6 1 1")).state;
+
+    try generate_moves(Color.white, tricky_pin, &move_list);
+
+    for (move_list.items) |move| {
+        try expect(move.move_type != MoveType.en_passant);
+    }
 }
