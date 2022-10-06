@@ -8,7 +8,6 @@ const log = @import("main.zig").log;
 const perft = @import("perft.zig");
 
 const board = @import("board.zig");
-const parse_fen = board.parse_fen;
 const GameState = board.GameState;
 const Position = board.Position;
 const BoardRights = board.BoardRights;
@@ -122,10 +121,7 @@ pub const GuiCommand = union(GuiCommandTag) {
     eval,
     board,
     moves,
-    position: struct {
-        active_color: Color,
-        state: GameState,
-    },
+    position: GameState,
     debug: bool,
     perft: u32,
 };
@@ -164,17 +160,18 @@ pub fn send_command(command: EngineCommand, allocator: Allocator) !void {
         EngineCommandTag.option => |option| {
             _ = try std.fmt.format(stdout, "option name {s} type {s}", .{ option.name, option.option_type });
             if (option.default) |default| {
-                _ = try std.fmt.format(stdout, "default {s}", .{default});
+                _ = try std.fmt.format(stdout, " default {s}", .{default});
             }
             if (option.min) |min| {
-                _ = try std.fmt.format(stdout, "min {s}", .{min});
+                _ = try std.fmt.format(stdout, " min {s}", .{min});
             }
             if (option.max) |max| {
-                _ = try std.fmt.format(stdout, "max {s}", .{max});
+                _ = try std.fmt.format(stdout, "m ax {s}", .{max});
             }
             if (option.option_var) |option_var| {
-                _ = try std.fmt.format(stdout, "var {s}", .{option_var});
+                _ = try std.fmt.format(stdout, " var {s}", .{option_var});
             }
+            _ = try stdout.write("\n");
         },
         EngineCommandTag.report_perft => |report| {
             const elapsed_nanos = @intToFloat(f64, report.time_elapsed);
@@ -284,23 +281,19 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             return GuiCommand.stop;
         } else if (std.mem.eql(u8, command, "position")) {
             const pos_variant = words.next().?;
-            var active_color: Color = undefined;
             var state: GameState = undefined;
             var maybe_moves_str: ?[]const u8 = null;
             if (std.mem.eql(u8, pos_variant, "fen")) {
                 // this part gets a bit messy - we concatenate the rest of the uci line, then split it on "moves"
                 var parts = std.mem.split(u8, words.rest(), "moves");
                 const fen = std.mem.trim(u8, parts.next().?, " ");
-                const result = try parse_fen(fen);
-                active_color = result.active_color;
-                state = result.state;
+                state = try GameState.from_fen(fen);
 
                 const remaining = parts.rest();
                 if (remaining.len != 0) {
                     maybe_moves_str = remaining;
                 }
             } else if (std.mem.eql(u8, pos_variant, "startpos")) {
-                active_color = Color.white;
                 state = GameState.initial();
                 if (words.next()) |keyword| {
                     if (std.mem.eql(u8, keyword, "moves")) {
@@ -314,19 +307,14 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             if (maybe_moves_str) |moves_str| {
                 var moves = std.mem.split(u8, std.mem.trim(u8, moves_str, " "), " ");
                 while (moves.next()) |move_str| {
-                    const move = Move.from_str(move_str, allocator, active_color, state) catch continue :read_command;
-                    switch (active_color) {
-                        Color.white => {
-                            state = state.make_move(Color.white, move);
-                        },
-                        Color.black => {
-                            state = state.make_move(Color.black, move);
-                        },
+                    const move = Move.from_str(move_str, allocator, state) catch continue :read_command;
+                    switch (state.active_color) {
+                        Color.white => _ = state.make_move(Color.white, move),
+                        Color.black => _ = state.make_move(Color.black, move),
                     }
-                    active_color = active_color.other();
                 }
             }
-            return GuiCommand{ .position = .{ .active_color = active_color, .state = state } };
+            return GuiCommand{ .position = state };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {

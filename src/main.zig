@@ -66,16 +66,10 @@ pub fn main() !void {
             },
             GuiCommand.isready => send_command(EngineCommand.readyok, allocator),
             GuiCommand.debug => {},
-            GuiCommand.newgame => {
-                active_color = Color.white;
-                state = GameState.initial();
-            },
-            GuiCommand.position => |game| {
-                active_color = game.active_color;
-                state = game.state;
-            },
+            GuiCommand.newgame => state = GameState.initial(),
+            GuiCommand.position => |new_state| state = new_state,
             GuiCommand.go => {
-                const best_move = try searcher.search(active_color, state, 4, allocator);
+                const best_move = try searcher.search(state, 4, allocator);
                 try send_command(EngineCommand{ .bestmove = best_move }, allocator);
             },
             GuiCommand.stop => {},
@@ -90,7 +84,7 @@ pub fn main() !void {
                 var move_list = ArrayList(Move).init(allocator);
                 defer move_list.deinit();
 
-                switch (active_color) {
+                switch (state.active_color) {
                     Color.white => try generate_moves(Color.white, state, &move_list),
                     Color.black => try generate_moves(Color.black, state, &move_list),
                 }
@@ -102,7 +96,7 @@ pub fn main() !void {
                 }
             },
             GuiCommand.perft => |depth| {
-                const report = try perft(active_color, state, allocator, @intCast(u8, depth));
+                const report = try perft(state, allocator, @intCast(u8, depth));
                 try send_command(EngineCommand{ .report_perft = report }, allocator);
             },
             GuiCommand.quit => break :mainloop,

@@ -1,6 +1,5 @@
 /// Evaluates a board position using the evaluation function from PeSTO
 /// https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function
-
 const board = @import("board.zig");
 const SquareIterator = board.SquareIterator;
 const Position = board.Position;
@@ -157,7 +156,7 @@ const ENDGAME_TABLE = [6][64]i32{
     ENDGAME_KING_TABLE,
 };
 
-const GAMEPHASE_INCREMENT = [6]u8{ 0, 1, 1, 2, 4, 0};
+const GAMEPHASE_INCREMENT = [6]u8{ 0, 1, 1, 2, 4, 0 };
 
 var midgame_table: [2][6][64]i32 = undefined;
 var endgame_table: [2][6][64]i32 = undefined;
@@ -184,13 +183,13 @@ pub fn evaluate(comptime active_color: Color, position: Position) i32 {
     var endgame = [2]i32{ 0, 0 };
     var gamephase: u8 = 0;
 
-    const pieces = position.as_array();
+    const pieces = position.piece_bitboards;
     var piece: u3 = 0;
-    while(piece < 6): (piece += 1) {
+    while (piece < 6) : (piece += 1) {
         var color: u2 = 0;
-        while (color < 2): (color += 1) {
+        while (color < 2) : (color += 1) {
             var existing_pieces = pieces[color][piece];
-            while (existing_pieces != 0): (pop_ls1b(&existing_pieces)) {
+            while (existing_pieces != 0) : (pop_ls1b(&existing_pieces)) {
                 const square = @enumToInt(get_lsb_square(existing_pieces));
                 midgame[color] += midgame_table[color][piece][square];
                 endgame[color] += endgame_table[color][piece][square];
@@ -210,7 +209,9 @@ pub fn evaluate(comptime active_color: Color, position: Position) i32 {
 
 test "starting position is equal" {
     const expectEqual = @import("std").testing.expectEqual;
+    const GameState = board.GameState;
 
-    const position = Position.starting_position();
+    const position = GameState.initial().position;
     try expectEqual(@as(i32, 0), evaluate(Color.white, position));
+    try expectEqual(@as(i32, 0), evaluate(Color.black, position));
 }

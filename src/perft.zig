@@ -15,11 +15,11 @@ pub const PerftResult = struct {
     nodes: u64,
 };
 
-pub fn perft(active_color: Color, state: GameState, allocator: Allocator, depth: u8) !PerftResult {
+pub fn perft(state: GameState, allocator: Allocator, depth: u8) !PerftResult {
     const start = try Instant.now();
     var nodes: u64 = 0;
 
-    switch (active_color) {
+    switch (state.active_color) {
         Color.white => {
             try perft_recursive(Color.white, state, allocator, &nodes, depth);
         },
@@ -29,17 +29,18 @@ pub fn perft(active_color: Color, state: GameState, allocator: Allocator, depth:
     }
 
     const now = try Instant.now();
-    return PerftResult {
+    return PerftResult{
         .time_elapsed = now.since(start),
         .nodes = nodes,
     };
 }
 
-fn perft_recursive(comptime active_color: Color, state: GameState, allocator: Allocator, nodes: *u64, depth: u8) Allocator.Error!void {
+fn perft_recursive(comptime active_color: Color, _state: GameState, allocator: Allocator, nodes: *u64, depth: u8) Allocator.Error!void {
     if (depth == 0) {
         nodes.* += 1;
         return;
     }
+    var state = _state;
 
     var move_list = ArrayList(Move).init(allocator);
     defer move_list.deinit();
@@ -47,8 +48,9 @@ fn perft_recursive(comptime active_color: Color, state: GameState, allocator: Al
     try generate_moves(active_color, state, &move_list);
 
     for (move_list.items) |move| {
-        const new_state = state.make_move(active_color, move);
+        const undo_info = state.make_move(active_color, move);
         const new_color = comptime active_color.other();
-        try perft_recursive(new_color, new_state, allocator, nodes, depth - 1);
+        try perft_recursive(new_color, state, allocator, nodes, depth - 1);
+        state.undo_move(move, undo_info);
     }
 }
