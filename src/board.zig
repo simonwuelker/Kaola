@@ -119,190 +119,6 @@ pub const CastlingRights = struct {
     }
 };
 
-pub const GameState = struct {
-    active_color: Color,
-    en_passant: ?Square,
-    castling_rights: CastlingRights,
-    position: Position,
-
-    const Self = @This();
-
-    /// Errors that can occur while parsing a FEN string
-    const FenParseError = error{
-        MissingField,
-        InvalidPosition,
-        InvalidActiveColor,
-        InvalidCastlingRights,
-        InvalidEnPassant,
-        InvalidHalfMoveCounter,
-        InvalidFullMoveCounter,
-    };
-
-    pub fn initial() Self {
-        return Self.from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") catch unreachable;
-    }
-
-    pub fn print(self: *const Self) !void {
-        const stdout = std.io.getStdOut().writer();
-        try self.castling_rights.print(stdout);
-        try self.position.print(stdout);
-    }
-
-    /// The move is assumed to be legal
-    pub fn make_move(self: *Self, comptime active_color: Color, move: Move) MoveUndoInfo {
-        // update position
-        const piece = self.position.remove_piece(move.from);
-        const captured = self.position.piece_at(move.to);
-        const undo_info = MoveUndoInfo{
-            .en_passant = self.en_passant,
-            .castling_rights = self.castling_rights,
-            .captured_piece = captured,
-        };
-
-        // TODO: castling, en_passant
-
-        if (move.flags == MoveFlags.promote) {
-            self.position.place_piece(Piece.new(active_color, move.promote_to()), move.to);
-        } else {
-            self.position.place_piece(piece, move.to);
-        }
-
-        if (piece.piece_type() == PieceType.pawn) {
-            if (@enumToInt(move.from) ^ @enumToInt(move.to) == 16) {
-                switch (active_color) {
-                    Color.white => self.en_passant = move.get_to().down_one(),
-                    Color.black => self.en_passant = move.get_to().up_one(),
-                }
-            }
-        }
-
-        // update castling rights
-        if (move.from == Position.king_square(active_color)) {
-            self.castling_rights.remove_kingside(active_color);
-            self.castling_rights.remove_queenside(active_color);
-            std.debug.print("BBBBBBBBBB", .{});
-        } else if (move.from == Position.kingside_rook_square(active_color)) {
-            self.castling_rights.remove_kingside(active_color);
-        } else if (move.from == Position.queenside_rook_square(active_color)) {
-            std.debug.print("AAAAAAAAAAA", .{});
-            self.castling_rights.remove_queenside(active_color);
-        }
-
-        return undo_info;
-    }
-
-    pub fn undo_move(self: *Self, move: Move, undo_info: MoveUndoInfo) void {
-        // todo pretty much every non-trivial move type
-        const moving_piece = self.position.remove_piece(move.to);
-        self.position.place_piece(moving_piece, move.from);
-        if (undo_info.captured_piece) |captured_piece| {
-            self.position.place_piece(captured_piece, move.to);
-        }
-
-        self.en_passant = undo_info.en_passant;
-        self.castling_rights = undo_info.castling_rights;
-
-        self.active_color = self.active_color.other();
-    }
-
-    pub fn from_fen(fen: []const u8) FenParseError!Self {
-        var parts = std.mem.split(u8, fen, " ");
-        const fen_position = parts.next().?;
-
-        // parse position
-        var position = Position.empty();
-        var ranks = std.mem.split(u8, fen_position, "/");
-        var rank: u6 = 0;
-        while (ranks.next()) |entry| {
-            var file: u6 = 0;
-            for (entry) |c| {
-                const square = @intToEnum(Square, rank * 8 + file);
-                const piece = switch (c) {
-                    'P' => Piece.white_pawn,
-                    'N' => Piece.white_knight,
-                    'B' => Piece.white_bishop,
-                    'R' => Piece.white_rook,
-                    'Q' => Piece.white_queen,
-                    'K' => Piece.white_king,
-                    'p' => Piece.black_pawn,
-                    'n' => Piece.black_knight,
-                    'b' => Piece.black_bishop,
-                    'r' => Piece.black_rook,
-                    'q' => Piece.black_queen,
-                    'k' => Piece.black_king,
-                    '1'...'8' => {
-                        file += @intCast(u4, c - '0');
-                        continue;
-                    },
-                    else => {
-                        return FenParseError.InvalidPosition;
-                    },
-                };
-                position.place_piece(piece, square);
-                file += 1;
-            }
-            if (file != 8) return FenParseError.InvalidPosition;
-            rank += 1;
-        }
-        if (rank != 8) return FenParseError.InvalidPosition;
-
-        const active_color_fen = parts.next().?;
-        var active_color: Color = undefined;
-        if (std.mem.eql(u8, active_color_fen, "w")) {
-            active_color = Color.white;
-        } else if (std.mem.eql(u8, active_color_fen, "b")) {
-            active_color = Color.black;
-        } else {
-            return FenParseError.InvalidActiveColor;
-        }
-
-        const castling_fen = parts.next().?;
-        var white_kingside = false;
-        var white_queenside = false;
-        var black_kingside = false;
-        var black_queenside = false;
-
-        for (castling_fen) |c| {
-            switch (c) {
-                'K' => white_kingside = true,
-                'Q' => white_queenside = true,
-                'k' => black_kingside = true,
-                'q' => black_queenside = true,
-                '-' => break,
-                else => return FenParseError.InvalidCastlingRights,
-            }
-        }
-
-        const en_passant_fen = parts.next().?;
-        var en_passant: ?Square = null;
-        if (!std.mem.eql(u8, en_passant_fen, "-")) {
-            en_passant = Square.from_str(en_passant_fen);
-        }
-        const castling_rights = CastlingRights{
-            .white_kingside = white_kingside,
-            .white_queenside = white_queenside,
-            .black_kingside = black_kingside,
-            .black_queenside = black_queenside,
-        };
-
-        return Self{ .active_color = active_color, .en_passant = en_passant, .position = position, .castling_rights = castling_rights };
-    }
-
-    pub fn can_castle_kingside(self: *const Self, comptime color: Color) bool {
-        switch (color) {
-            Color.white => return self.castling_rights.white_kingside,
-            Color.black => return self.castling_rights.black_kingside,
-        }
-    }
-
-    pub fn can_castle_queenside(self: *const Self, comptime color: Color) bool {
-        switch (color) {
-            Color.white => return self.castling_rights.white_queenside,
-            Color.black => return self.castling_rights.black_queenside,
-        }
-    }
-};
-
 pub const MoveFlags = enum(u2) {
     normal,
     en_passant,
@@ -359,16 +175,16 @@ pub const Move = packed struct(u16) {
         IllegalMove,
     };
 
-    pub fn from_str(str: []const u8, allocator: Allocator, state: GameState) !Self {
+    pub fn from_str(str: []const u8, allocator: Allocator, position: Position) !Self {
         const from = Square.from_str(str[0..2]);
         const to = Square.from_str(str[2..4]);
 
         var move_list = ArrayList(Move).init(allocator);
         defer move_list.deinit();
 
-        switch (state.active_color) {
-            Color.white => try generate_moves(Color.white, state, &move_list),
-            Color.black => try generate_moves(Color.black, state, &move_list),
+        switch (position.active_color) {
+            Color.white => try generate_moves(Color.white, position, &move_list),
+            Color.black => try generate_moves(Color.black, position, &move_list),
         }
         for (move_list.items) |move| {
             const move_name = try move.to_str(allocator);
@@ -381,11 +197,10 @@ pub const Move = packed struct(u16) {
     }
 };
 
-// Information that cannot be recovered after making a move
-pub const MoveUndoInfo = struct {
+pub const StateInfo = struct {
     en_passant: ?Square,
     castling_rights: CastlingRights,
-    captured_piece: ?Piece,
+    captured_piece: ?Piece = null,
 };
 
 // Squares on a chess board
@@ -466,27 +281,29 @@ const SQUARE_NAME = [64][:0]const u8{
 };
 
 pub const Position = struct {
+    active_color: Color,
     pieces: [64]Piece,
     piece_bitboards: [2][6]Bitboard,
     color_bitboards: [2]Bitboard,
     occupied: Bitboard,
+    zobrist_hash: u64 = 1,
+    history: [1024]StateInfo = undefined,
+    history_ptr: usize = 0,
 
     const Self = @This();
 
-    // pub fn as_array(self: *const Self) [2][6]Bitboard {
-    //     return [2][6]Bitboard{
-    //         [6]Bitboard{ self.white_pawns, self.white_knights, self.white_bishops, self.white_rooks, self.white_queens, self.white_king },
-    //         [6]Bitboard{ self.black_pawns, self.black_knights, self.black_bishops, self.black_rooks, self.black_queens, self.black_king },
-    //     };
-    // }
-
     pub fn empty() Self {
         return Self{
+            .active_color = Color.white,
             .pieces = [1]Piece{Piece.no_piece} ** 64,
             .piece_bitboards = [1][6]Bitboard{[1]Bitboard{0} ** 6} ** 2,
             .color_bitboards = [1]Bitboard{0} ** 2,
             .occupied = 0,
         };
+    }
+
+    pub fn current_state(self: *const Self) StateInfo {
+        return self.history[self.history_ptr];
     }
 
     pub fn king_square(comptime color: Color) Square {
@@ -551,6 +368,8 @@ pub const Position = struct {
             _ = try writer.write("\n");
         }
         _ = try writer.write("\n   a b c d e f g h\n");
+        try self.history[self.history_ptr].castling_rights.print(writer);
+        try std.fmt.format(writer, "\nZobrist hash: 0x{x:0>16}\n", .{self.zobrist_hash});
     }
 
     pub fn pawns(self: *const Self, comptime color: Color) Bitboard {
@@ -592,6 +411,8 @@ pub const Position = struct {
         self.piece_bitboards[color_index][type_index] |= square.as_board();
         self.color_bitboards[color_index] |= square.as_board();
         self.occupied |= square.as_board();
+
+        self.zobrist_hash ^= zobrist.piece_hash(piece, square);
     }
 
     pub fn remove_piece(self: *Self, square: Square) Piece {
@@ -606,11 +427,18 @@ pub const Position = struct {
         self.piece_bitboards[color_index][type_index] ^= square.as_board();
         self.color_bitboards[color_index] ^= square.as_board();
         self.occupied ^= square.as_board();
+
+        self.zobrist_hash ^= zobrist.piece_hash(piece, square);
+
         return piece;
     }
 
     pub inline fn piece_at(self: *const Self, square: Square) Piece {
         return self.pieces[@enumToInt(square)];
+    }
+
+    pub fn initial() Self {
+        return Self.from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") catch unreachable;
     }
 
     /// Return a bitboard marking all the squares attacked(or guarded) by a piece of a certain color
@@ -675,6 +503,222 @@ pub const Position = struct {
         }
         return true;
     }
+
+    /// The move is assumed to be legal
+    pub fn make_move(self: *Self, comptime active_color: Color, move: Move) void {
+        // update position
+        self.history_ptr += 1;
+        self.history[self.history_ptr] = self.history[self.history_ptr - 1];
+        self.history[self.history_ptr].captured_piece = null;
+        self.history[self.history_ptr].en_passant = null;
+
+        const piece = self.remove_piece(move.from);
+        const captured = self.piece_at(move.to);
+
+        if (captured != Piece.no_piece) {
+            self.history[self.history_ptr].captured_piece = captured;
+            _ = self.remove_piece(move.to);
+        }
+
+        switch (move.flags) {
+            MoveFlags.normal => {
+                self.place_piece(piece, move.to);
+
+                // update en passant rights
+                if (piece.piece_type() == PieceType.pawn) {
+                    if (@enumToInt(move.from) ^ @enumToInt(move.to) == 16) {
+                        switch (active_color) {
+                            Color.white => self.history[self.history_ptr].en_passant = move.get_to().down_one(),
+                            Color.black => self.history[self.history_ptr].en_passant = move.get_to().up_one(),
+                        }
+                    }
+                }
+
+                // update castling rights
+                if (move.from == Position.king_square(active_color)) {
+                    self.history[self.history_ptr].castling_rights.remove_kingside(active_color);
+                    self.history[self.history_ptr].castling_rights.remove_queenside(active_color);
+                } else if (move.from == Position.kingside_rook_square(active_color)) {
+                    self.history[self.history_ptr].castling_rights.remove_kingside(active_color);
+                } else if (move.from == Position.queenside_rook_square(active_color)) {
+                    self.history[self.history_ptr].castling_rights.remove_queenside(active_color);
+                }
+            },
+            MoveFlags.promote => {
+                self.place_piece(Piece.new(active_color, move.promote_to()), move.to);
+            },
+            MoveFlags.en_passant => {
+                self.place_piece(piece, move.to);
+                switch (active_color) {
+                    Color.white => _ = self.remove_piece(move.get_to().down_one()),
+                    Color.black => _ = self.remove_piece(move.get_to().up_one()),
+                }
+            },
+            MoveFlags.castling => {
+                self.place_piece(piece, move.to);
+                self.history[self.history_ptr].castling_rights.remove_kingside(active_color);
+                self.history[self.history_ptr].castling_rights.remove_queenside(active_color);
+
+                // move rook
+                switch (active_color) {
+                    Color.white => {
+                        if (move.get_to().file() == 2) {
+                            self.place_piece(self.remove_piece(Square.A1), Square.D1);
+                        } else if (move.get_to().file() == 6) {
+                            self.place_piece(self.remove_piece(Square.H1), Square.F1);
+                        }
+                    },
+                    Color.black => {
+                        if (move.get_to().file() == 2) {
+                            self.place_piece(self.remove_piece(Square.A8), Square.D8);
+                        } else if (move.get_to().file() == 6) {
+                            self.place_piece(self.remove_piece(Square.H8), Square.F8);
+                        }
+                    },
+                }
+            },
+        }
+        self.flip_color();
+    }
+
+    pub fn undo_move(self: *Self, move: Move) void {
+        std.debug.assert(self.history_ptr != 0);
+        self.flip_color();
+
+        // todo pretty much every non-trivial move type
+        const moving_piece = self.remove_piece(move.to);
+
+        if (self.current_state().captured_piece) |captured_piece| {
+            self.place_piece(captured_piece, move.to);
+        }
+
+        if (move.flags == MoveFlags.promote) {
+            self.place_piece(Piece.new(self.active_color, PieceType.pawn), move.from);
+        } else {
+            self.place_piece(moving_piece, move.from);
+        }
+
+        self.history_ptr -= 1;
+    }
+
+    fn flip_color(self: *Self) void {
+        self.active_color = self.active_color.other();
+        self.zobrist_hash ^= zobrist.color_hash;
+    }
+
+    /// Errors that can occur while parsing a FEN string
+    const FenParseError = error{
+        MissingField,
+        InvalidPosition,
+        InvalidActiveColor,
+        InvalidCastlingRights,
+        InvalidEnPassant,
+        InvalidHalfMoveCounter,
+        InvalidFullMoveCounter,
+    };
+
+    pub fn from_fen(fen: []const u8) FenParseError!Self {
+        var parts = std.mem.split(u8, fen, " ");
+        const fen_position = parts.next().?;
+
+        // parse position
+        var position = Self.empty();
+        var ranks = std.mem.split(u8, fen_position, "/");
+        var rank: u6 = 0;
+        while (ranks.next()) |entry| {
+            var file: u6 = 0;
+            for (entry) |c| {
+                const square = @intToEnum(Square, rank * 8 + file);
+                const piece = switch (c) {
+                    'P' => Piece.white_pawn,
+                    'N' => Piece.white_knight,
+                    'B' => Piece.white_bishop,
+                    'R' => Piece.white_rook,
+                    'Q' => Piece.white_queen,
+                    'K' => Piece.white_king,
+                    'p' => Piece.black_pawn,
+                    'n' => Piece.black_knight,
+                    'b' => Piece.black_bishop,
+                    'r' => Piece.black_rook,
+                    'q' => Piece.black_queen,
+                    'k' => Piece.black_king,
+                    '1'...'8' => {
+                        file += @intCast(u4, c - '0');
+                        continue;
+                    },
+                    else => {
+                        return FenParseError.InvalidPosition;
+                    },
+                };
+                position.place_piece(piece, square);
+                file += 1;
+            }
+            if (file != 8) return FenParseError.InvalidPosition;
+            rank += 1;
+        }
+        if (rank != 8) return FenParseError.InvalidPosition;
+
+        const active_color_fen = parts.next().?;
+        if (std.mem.eql(u8, active_color_fen, "w")) {
+            position.active_color = Color.white;
+        } else if (std.mem.eql(u8, active_color_fen, "b")) {
+            position.active_color = Color.black;
+        } else {
+            return FenParseError.InvalidActiveColor;
+        }
+
+        const castling_fen = parts.next().?;
+        var white_kingside = false;
+        var white_queenside = false;
+        var black_kingside = false;
+        var black_queenside = false;
+
+        for (castling_fen) |c| {
+            switch (c) {
+                'K' => white_kingside = true,
+                'Q' => white_queenside = true,
+                'k' => black_kingside = true,
+                'q' => black_queenside = true,
+                '-' => break,
+                else => return FenParseError.InvalidCastlingRights,
+            }
+        }
+
+        const en_passant_fen = parts.next().?;
+        var en_passant: ?Square = null;
+        if (!std.mem.eql(u8, en_passant_fen, "-")) {
+            en_passant = Square.from_str(en_passant_fen);
+        }
+        const castling_rights = CastlingRights{
+            .white_kingside = white_kingside,
+            .white_queenside = white_queenside,
+            .black_kingside = black_kingside,
+            .black_queenside = black_queenside,
+        };
+
+        const state = StateInfo{
+            .en_passant = en_passant,
+            .castling_rights = castling_rights,
+        };
+
+        position.history[position.history_ptr] = state;
+
+        return position;
+    }
+
+    pub fn can_castle_kingside(self: *const Self, comptime color: Color) bool {
+        switch (color) {
+            Color.white => return self.current_state().castling_rights.white_kingside,
+            Color.black => return self.current_state().castling_rights.black_kingside,
+        }
+    }
+
+    pub fn can_castle_queenside(self: *const Self, comptime color: Color) bool {
+        switch (color) {
+            Color.white => return self.current_state().castling_rights.white_queenside,
+            Color.black => return self.current_state().castling_rights.black_queenside,
+        }
+    }
 };
 
 /// Iterator over all 64 squares on a chess board
@@ -703,18 +747,19 @@ pub const SquareIterator = struct {
 test "king unsafe squares" {
     const expectEqual = std.testing.expectEqual;
 
-    const state = try GameState.from_fen("k6R/3r4/1p6/8/2n1K3/8/q7/3b4 w - - 0 1");
-    try expectEqual(@as(Bitboard, 0xbfe3b4d9d0bf70b), state.position.king_unsafe_squares(Color.white));
+    const position = try Position.from_fen("k6R/3r4/1p6/8/2n1K3/8/q7/3b4 w - - 0 1");
+    try expectEqual(@as(Bitboard, 0xbfe3b4d9d0bf70b), position.king_unsafe_squares(Color.white));
 }
 
 test "update castling rights" {
     const expect = std.testing.expect;
 
-    var state = try GameState.from_fen("r3k2r/3N4/8/8/p7/8/8/R3K2R w KQkq - 0 1");
-    try expect(state.can_castle_kingside(Color.white));
-    try expect(state.can_castle_queenside(Color.white));
-    try expect(state.can_castle_kingside(Color.black));
-    try expect(state.can_castle_queenside(Color.black));
+    // https://lichess.org/analysis/fromPosition/r3k2r/3N4/8/8/p7/8/8/R3K2R_w_KQkq_-_0_1
+    var position = try Position.from_fen("r3k2r/3N4/8/8/p7/8/8/R3K2R w KQkq - 0 1");
+    try expect(position.can_castle_kingside(Color.white));
+    try expect(position.can_castle_queenside(Color.white));
+    try expect(position.can_castle_kingside(Color.black));
+    try expect(position.can_castle_queenside(Color.black));
 
     // moving the right rook voids kingside castling rights for white
     {
@@ -722,14 +767,14 @@ test "update castling rights" {
             .from = Square.H1,
             .to = Square.H4,
         };
-        const undo_info = state.make_move(Color.white, move);
+        position.make_move(Color.white, move);
 
-        try expect(!state.can_castle_kingside(Color.white));
-        try expect(state.can_castle_queenside(Color.white));
-        try expect(state.can_castle_kingside(Color.black));
-        try expect(state.can_castle_queenside(Color.black));
+        try expect(!position.can_castle_kingside(Color.white));
+        try expect(position.can_castle_queenside(Color.white));
+        try expect(position.can_castle_kingside(Color.black));
+        try expect(position.can_castle_queenside(Color.black));
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 
     // capturing with the left rook also voids castling rights
@@ -738,14 +783,14 @@ test "update castling rights" {
             .from = Square.A1,
             .to = Square.A4,
         };
-        const undo_info = state.make_move(Color.white, move);
+        position.make_move(Color.white, move);
 
-        try expect(state.can_castle_kingside(Color.white));
-        try expect(!state.can_castle_queenside(Color.white));
-        try expect(state.can_castle_kingside(Color.black));
-        try expect(state.can_castle_queenside(Color.black));
+        try expect(position.can_castle_kingside(Color.white));
+        try expect(!position.can_castle_queenside(Color.white));
+        try expect(position.can_castle_kingside(Color.black));
+        try expect(position.can_castle_queenside(Color.black));
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 
     // moving the king voids castling rights on both sides
@@ -754,14 +799,14 @@ test "update castling rights" {
             .from = Square.E1,
             .to = Square.E2,
         };
-        const undo_info = state.make_move(Color.white, move);
+        position.make_move(Color.white, move);
 
-        try expect(!state.can_castle_kingside(Color.white));
-        try expect(!state.can_castle_queenside(Color.white));
-        try expect(state.can_castle_kingside(Color.black));
-        try expect(state.can_castle_queenside(Color.black));
+        try expect(!position.can_castle_kingside(Color.white));
+        try expect(!position.can_castle_queenside(Color.white));
+        try expect(position.can_castle_kingside(Color.black));
+        try expect(position.can_castle_queenside(Color.black));
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 
     // capturing (with the black king) does the same
@@ -770,22 +815,23 @@ test "update castling rights" {
             .from = Square.E8,
             .to = Square.D7,
         };
-        const undo_info = state.make_move(Color.black, move);
+        position.make_move(Color.black, move);
 
-        try expect(state.can_castle_kingside(Color.white));
-        try expect(state.can_castle_queenside(Color.white));
-        try expect(!state.can_castle_kingside(Color.black));
-        try expect(!state.can_castle_queenside(Color.black));
+        try expect(position.can_castle_kingside(Color.white));
+        try expect(position.can_castle_queenside(Color.white));
+        try expect(!position.can_castle_kingside(Color.black));
+        try expect(!position.can_castle_queenside(Color.black));
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 }
 
 test "en passant" {
     const expectEqual = std.testing.expectEqual;
 
-    var state = try GameState.from_fen("k7/5p2/K7/8/5Pp1/8/8/8 w - f3 0 1");
-    try expectEqual(Square.F3, state.en_passant.?);
+    // https://lichess.org/analysis/standard/k7/5p2/K7/8/5Pp1/8/8/8_w_-_f3_0_1
+    var position = try Position.from_fen("k7/5p2/K7/8/5Pp1/8/8/8 w - f3 0 1");
+    try expectEqual(Square.F3, position.current_state().en_passant.?);
 
     // next move resets en passant square
     {
@@ -793,20 +839,20 @@ test "en passant" {
             .from = Square.G4,
             .to = Square.G3,
         };
-        const undo_info = state.make_move(Color.black, move);
+        position.make_move(Color.black, move);
 
-        try expectEqual(null, state.en_passant);
+        try expectEqual(null, position.current_state().en_passant);
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 
     // next move might also create a new en passant square
     {
         const move = Move{ .from = Square.F7, .to = Square.F5 };
-        const undo_info = state.make_move(Color.black, move);
-        try expectEqual(Square.F6, state.en_passant.?);
+        position.make_move(Color.black, move);
+        try expectEqual(Square.F6, position.current_state().en_passant.?);
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 
     // assure post-en passant positions are correct
@@ -815,12 +861,13 @@ test "en passant" {
         const move = Move{
             .from = Square.G4,
             .to = Square.F3,
+            .flags = MoveFlags.en_passant,
         };
-        const undo_info = state.make_move(Color.black, move);
+        position.make_move(Color.black, move);
 
-        try expectEqual(@as(Bitboard, 0x200000002000), state.position.pawns(Color.black));
-        try expectEqual(@as(Bitboard, 0), state.position.pawns(Color.white));
+        try expectEqual(@as(Bitboard, 0x200000002000), position.pawns(Color.black));
+        try expectEqual(@as(Bitboard, 0), position.pawns(Color.white));
 
-        state.undo_move(move, undo_info);
+        position.undo_move(move);
     }
 }

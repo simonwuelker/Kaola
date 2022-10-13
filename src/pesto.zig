@@ -209,9 +209,8 @@ pub fn evaluate(comptime active_color: Color, position: Position) i32 {
 
 test "starting position is equal" {
     const expectEqual = @import("std").testing.expectEqual;
-    const GameState = board.GameState;
 
-    const position = GameState.initial().position;
+    const position = Position.initial();
     try expectEqual(@as(i32, 0), evaluate(Color.white, position));
     try expectEqual(@as(i32, 0), evaluate(Color.black, position));
 }

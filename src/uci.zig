@@ -3,14 +3,11 @@ const std = @import("std");
 
 const Level = std.log.Level;
 const Scope = std.log.default;
-const log = @import("main.zig").log;
 
 const perft = @import("perft.zig");
 
 const board = @import("board.zig");
-const GameState = board.GameState;
 const Position = board.Position;
-const BoardRights = board.BoardRights;
 const Color = board.Color;
 const Move = board.Move;
 
@@ -50,14 +47,6 @@ pub fn read_word(comptime Reader: type, src: Reader) !?[]const u8 {
 const FenError = error{
     missing_field,
 };
-
-fn log_command(is_engine: bool, command: []const u8) void {
-    if (is_engine) {
-        log(Level.info, Scope, "[Engine]:\n\t{s}\n", .{command});
-    } else {
-        log(Level.info, Scope, "[Gui]:\n\t{s}\n", .{command});
-    }
-}
 
 /// Reads a block of non-whitespace characters and skips any number of following whitespaces
 pub fn read_fen(comptime Reader: type, src: Reader, allocator: Allocator) ![]const u8 {
@@ -121,7 +110,7 @@ pub const GuiCommand = union(GuiCommandTag) {
     eval,
     board,
     moves,
-    position: GameState,
+    position: Position,
     debug: bool,
     perft: u32,
 };
@@ -198,7 +187,6 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
 
     read_command: while (true) {
         const input = (try stdin.readUntilDelimiter(&buffer, '\n'));
-        log_command(false, input);
         if (input.len == 0) continue;
 
         var words = std.mem.split(u8, input, " ");
@@ -281,20 +269,20 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             return GuiCommand.stop;
         } else if (std.mem.eql(u8, command, "position")) {
             const pos_variant = words.next().?;
-            var state: GameState = undefined;
+            var position: Position = undefined;
             var maybe_moves_str: ?[]const u8 = null;
             if (std.mem.eql(u8, pos_variant, "fen")) {
                 // this part gets a bit messy - we concatenate the rest of the uci line, then split it on "moves"
                 var parts = std.mem.split(u8, words.rest(), "moves");
                 const fen = std.mem.trim(u8, parts.next().?, " ");
-                state = try GameState.from_fen(fen);
+                position = try Position.from_fen(fen);
 
                 const remaining = parts.rest();
                 if (remaining.len != 0) {
                     maybe_moves_str = remaining;
                 }
             } else if (std.mem.eql(u8, pos_variant, "startpos")) {
-                state = GameState.initial();
+                position = Position.initial();
                 if (words.next()) |keyword| {
                     if (std.mem.eql(u8, keyword, "moves")) {
                         maybe_moves_str = words.rest();
@@ -307,14 +295,14 @@ pub fn next_command(allocator: Allocator) !GuiCommand {
             if (maybe_moves_str) |moves_str| {
                 var moves = std.mem.split(u8, std.mem.trim(u8, moves_str, " "), " ");
                 while (moves.next()) |move_str| {
-                    const move = Move.from_str(move_str, allocator, state) catch continue :read_command;
-                    switch (state.active_color) {
-                        Color.white => _ = state.make_move(Color.white, move),
-                        Color.black => _ = state.make_move(Color.black, move),
+                    const move = Move.from_str(move_str, allocator, position) catch continue :read_command;
+                    switch (position.active_color) {
+                        Color.white => _ = position.make_move(Color.white, move),
+                        Color.black => _ = position.make_move(Color.black, move),
                     }
                 }
             }
-            return GuiCommand{ .position = state };
+            return GuiCommand{ .position = position };
         }
         // non-standard commands
         else if (std.mem.eql(u8, command, "eval")) {
