@@ -7,12 +7,11 @@ const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
 const board = @import("board.zig");
-const GameState = board.GameState;
 const Position = board.Position;
 const BoardRights = board.BoardRights;
 const Color = board.Color;
 const Move = board.Move;
-const MoveType = board.MoveType;
+const MoveFlags = board.MoveFlags;
 const PieceType = board.PieceType;
 const Square = board.Square;
 
@@ -149,35 +148,30 @@ pub fn generate_checkmask(comptime us: Color, position: Position) Bitboard {
     return ~@as(u64, 0);
 }
 
-fn add_all(from: Bitboard, moves: Bitboard, list: *ArrayList(Move), move_type: MoveType) !void {
+fn add_all(from: Square, moves: Bitboard, list: *ArrayList(Move), flags: MoveFlags) !void {
     var remaining_moves = moves;
     while (remaining_moves != 0) : (pop_ls1b(&remaining_moves)) {
         const to = get_lsb_square(remaining_moves);
         try list.append(Move{
             .from = from,
-            .to = to.as_board(),
-            .move_type = move_type,
+            .to = to,
+            .flags = flags,
         });
     }
 }
 
 // Caller owns returned memory
-pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move)) Allocator.Error!void {
-    const them = comptime us.other();
-    const pos = state.position;
+pub fn generate_moves(comptime us: Color, pos: Position, move_list: *ArrayList(Move)) Allocator.Error!void {
     const king_unsafe_squares = pos.king_unsafe_squares(us);
     const diag_sliders = pos.bishops(us) | pos.queens(us);
     const straight_sliders = pos.rooks(us) | pos.queens(us);
     const enemy_or_empty = ~pos.occupied_by(us);
-    const enemy = pos.occupied_by(them);
-    const empty = ~pos.occupied;
     const checkmask = generate_checkmask(us, pos);
     const pinmask = generate_pinmask(us, pos);
 
     // legal king moves
-    const king_attacks = bitboard.king_attacks(pos.king(us)) & ~king_unsafe_squares;
-    try add_all(pos.king(us), king_attacks & empty, move_list, MoveType{ .quiet = PieceType.king });
-    try add_all(pos.king(us), king_attacks & enemy, move_list, MoveType{ .capture = PieceType.king });
+    const king_attacks = bitboard.king_attacks(pos.king(us)) & ~king_unsafe_squares & enemy_or_empty;
+    try add_all(bitboard.get_lsb_square(pos.king(us)), king_attacks, move_list, MoveFlags.normal);
 
     // when we're in double check, only the king is allowed to move
     if (checkmask == 0) return;
@@ -188,8 +182,7 @@ pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayLis
     while (unpinned_knights != 0) : (pop_ls1b(&unpinned_knights)) {
         const square = get_lsb_square(unpinned_knights);
         const moves = bitboard.knight_attack(square) & enemy_or_empty & checkmask;
-        try add_all(square.as_board(), moves & empty, move_list, MoveType{ .quiet = PieceType.knight });
-        try add_all(square.as_board(), moves & enemy, move_list, MoveType{ .capture = PieceType.knight });
+        try add_all(square, moves, move_list, MoveFlags.normal);
     }
 
     // legal diagonal slider moves
@@ -199,29 +192,15 @@ pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayLis
     while (unpinned_bishops != 0) : (pop_ls1b(&unpinned_bishops)) {
         const square = get_lsb_square(unpinned_bishops);
         const moves = bishop_attacks(square, pos.occupied) & enemy_or_empty & checkmask;
-        const from = square.as_board();
 
-        if (from & pos.bishops(us) != 0) {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.bishop });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.bishop });
-        } else {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
-        }
+        try add_all(square, moves, move_list, MoveFlags.normal);
     }
 
     while (pinned_bishops != 0) : (pop_ls1b(&pinned_bishops)) {
         const square = get_lsb_square(pinned_bishops);
         const moves = bishop_attacks(square, pos.occupied) & enemy_or_empty & checkmask & pinmask.diagonal;
-        const from = square.as_board();
 
-        if (from & pos.bishops(us) != 0) {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.bishop });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.bishop });
-        } else {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
-        }
+        try add_all(square, moves, move_list, MoveFlags.normal);
     }
 
     // legal straight slider moves
@@ -230,91 +209,77 @@ pub fn generate_moves(comptime us: Color, state: GameState, move_list: *ArrayLis
     while (unpinned_rooks != 0) : (pop_ls1b(&unpinned_rooks)) {
         const square = get_lsb_square(unpinned_rooks);
         const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask;
-        const from = square.as_board();
 
-        if (from & pos.rooks(us) != 0) {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.rook });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.rook });
-        } else {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
-        }
+        try add_all(square, moves, move_list, MoveFlags.normal);
     }
 
     var pinned_rooks = straight_sliders & pinmask.straight;
     while (pinned_rooks != 0) : (pop_ls1b(&pinned_rooks)) {
         const square = get_lsb_square(pinned_rooks);
         const moves = rook_attacks(square, pos.occupied) & enemy_or_empty & checkmask & pinmask.straight;
-        const from = square.as_board();
 
-        if (from & pos.rooks(us) != 0) {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.rook });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.rook });
-        } else {
-            try add_all(from, moves & empty, move_list, MoveType{ .quiet = PieceType.queen });
-            try add_all(from, moves & enemy, move_list, MoveType{ .capture = PieceType.queen });
-        }
+        try add_all(square, moves, move_list, MoveFlags.normal);
     }
 
     // try pawn_moves(us, pos, move_list, checkmask, pinmask);
-    try castle(us, state, move_list, king_unsafe_squares);
-    try pawn_moves(us, state, move_list, checkmask, pinmask);
+    try castle(us, pos, move_list, king_unsafe_squares);
+    try pawn_moves(us, pos, move_list, checkmask, pinmask);
     return;
 }
 
-fn castle(comptime us: Color, state: GameState, move_list: *ArrayList(Move), king_unsafe_squares: Bitboard) !void {
+fn castle(comptime us: Color, pos: Position, move_list: *ArrayList(Move), king_unsafe_squares: Bitboard) !void {
     // cannot castle either way when in check
-    if (state.position.king(us) & king_unsafe_squares != 0) return;
+    if (pos.king(us) & king_unsafe_squares != 0) return;
 
     // The squares we traverse must not be in check or occupied
-    const blockers = state.position.occupied | king_unsafe_squares;
-    if (state.can_castle_queenside(us) and blockers & queenside_blockers(us) == 0) {
+    const blockers = pos.occupied | king_unsafe_squares;
+    if (pos.can_castle_queenside(us) and blockers & queenside_blockers(us) == 0) {
         switch (us) {
             Color.white => {
                 try move_list.append(Move{
-                    .from = Square.E1.as_board(),
-                    .to = Square.C1.as_board(),
-                    .move_type = MoveType{ .castle = board.WHITE_QUEENSIDE },
+                    .from = Square.E1,
+                    .to = Square.C1,
+                    .flags = MoveFlags.castling,
                 });
             },
             Color.black => {
                 try move_list.append(Move{
-                    .from = Square.E8.as_board(),
-                    .to = Square.C8.as_board(),
-                    .move_type = MoveType{ .castle = board.BLACK_QUEENSIDE },
+                    .from = Square.E8,
+                    .to = Square.C8,
+                    .flags = MoveFlags.castling,
                 });
             },
         }
     }
 
-    if (state.can_castle_kingside(us) and blockers & kingside_blockers(us) == 0) {
+    if (pos.can_castle_kingside(us) and blockers & kingside_blockers(us) == 0) {
         switch (us) {
             Color.white => {
                 try move_list.append(Move{
-                    .from = Square.E1.as_board(),
-                    .to = Square.G1.as_board(),
-                    .move_type = MoveType{ .castle = board.WHITE_KINGSIDE },
+                    .from = Square.E1,
+                    .to = Square.G1,
+                    .flags = MoveFlags.castling,
                 });
             },
             Color.black => {
                 try move_list.append(Move{
-                    .from = Square.E8.as_board(),
-                    .to = Square.G8.as_board(),
-                    .move_type = MoveType{ .castle = board.BLACK_KINGSIDE },
+                    .from = Square.E8,
+                    .to = Square.G8,
+                    .flags = MoveFlags.castling,
                 });
             },
         }
     }
 }
 
-fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move), checkmask: Bitboard, pinmask: Pinmask) !void {
+fn pawn_moves(comptime us: Color, pos: Position, move_list: *ArrayList(Move), checkmask: Bitboard, pinmask: Pinmask) !void {
     // Terminology:
     // moving => move pawn one square
     // pushing => move pawn two squares
     // moving/pushing uses the straight pinmask, capturing the diagonal one (like a queen)
     const them = comptime us.other();
-    const empty = ~state.position.occupied;
-    const our_pawns = state.position.pawns(us);
+    const empty = ~pos.occupied;
+    const our_pawns = pos.pawns(us);
 
     // pawn moves
     var legal_pawn_moves: Bitboard = 0;
@@ -340,18 +305,10 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
         const to = get_lsb_square(legal_pawn_moves);
         switch (us) {
             Color.white => {
-                try move_list.append(Move{
-                    .from = to.down_one().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType{ .quiet = PieceType.pawn },
-                });
+                try move_list.append(Move{ .from = to.down_one(), .to = to });
             },
             Color.black => {
-                try move_list.append(Move{
-                    .from = to.up_one().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType{ .quiet = PieceType.pawn },
-                });
+                try move_list.append(Move{ .from = to.up_one(), .to = to });
             },
         }
     }
@@ -363,22 +320,14 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
             var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & bitboard.RANK_3) >> 8 & empty & checkmask;
             while (pawn_pushes != 0) : (pop_ls1b(&pawn_pushes)) {
                 const to = get_lsb_square(pawn_pushes);
-                try move_list.append(Move{
-                    .from = to.down_two().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType.double_push,
-                });
+                try move_list.append(Move{ .from = to.down_two(), .to = to });
             }
         },
         Color.black => {
             var pawn_pushes: Bitboard = ((pinned_pawn_moves | unpinned_pawn_moves) & bitboard.RANK_6) << 8 & empty & checkmask;
             while (pawn_pushes != 0) : (pop_ls1b(&pawn_pushes)) {
                 const to = get_lsb_square(pawn_pushes);
-                try move_list.append(Move{
-                    .from = to.up_two().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType.double_push,
-                });
+                try move_list.append(Move{ .from = to.up_two(), .to = to });
             }
         },
     }
@@ -394,8 +343,8 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
     right_captures |= pawn_attacks_right(us, diag_pinned_pawns) & pinmask.diagonal;
     right_captures |= pawn_attacks_right(us, unpinned_pawns);
 
-    left_captures &= state.position.occupied_by(them);
-    right_captures &= state.position.occupied_by(them);
+    left_captures &= pos.occupied_by(them);
+    right_captures &= pos.occupied_by(them);
     left_captures &= checkmask;
     right_captures &= checkmask;
 
@@ -404,16 +353,14 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
         switch (us) {
             Color.white => {
                 try move_list.append(Move{
-                    .from = to.down_right().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType{ .capture = PieceType.pawn },
+                    .from = to.down_right(),
+                    .to = to,
                 });
             },
             Color.black => {
                 try move_list.append(Move{
-                    .from = to.up_right().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType{ .capture = PieceType.pawn },
+                    .from = to.up_right(),
+                    .to = to,
                 });
             },
         }
@@ -424,51 +371,49 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
         switch (us) {
             Color.white => {
                 try move_list.append(Move{
-                    .from = to.down_left().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType{ .capture = PieceType.pawn },
+                    .from = to.down_left(),
+                    .to = to,
                 });
             },
             Color.black => {
                 try move_list.append(Move{
-                    .from = to.up_left().as_board(),
-                    .to = to.as_board(),
-                    .move_type = MoveType{ .capture = PieceType.pawn },
+                    .from = to.up_left(),
+                    .to = to,
                 });
             },
         }
     }
 
     // en passant
-    if (state.board_rights.en_passant) |ep_square| {
+    if (pos.current_state().en_passant) |ep_square| {
         // straight pinned pawns can never take en-passant
         var ep_attackers = pawn_attacks(them, ep_square.as_board()) & our_pawns & ~pinmask.straight;
 
         while (ep_attackers != 0) : (pop_ls1b(&ep_attackers)) {
-            const from = get_lsb_square(ep_attackers).as_board();
+            const from = get_lsb_square(ep_attackers);
 
-            if (from & pinmask.diagonal == 0 or (from & pinmask.diagonal != 0 and ep_square.as_board() & pinmask.diagonal != 0)) {
+            if (from.as_board() & pinmask.diagonal == 0 or (from.as_board() & pinmask.diagonal != 0 and ep_square.as_board() & pinmask.diagonal != 0)) {
                 // make sure king is not left in check
-                const straight_sliders = state.position.rooks(them) | state.position.queens(them);
-                const king = bitboard.get_lsb_square(state.position.king(us));
+                const straight_sliders = pos.rooks(them) | pos.queens(them);
+                const king = bitboard.get_lsb_square(pos.king(us));
                 switch (us) {
                     Color.white => {
-                        const mask = from | ep_square.down_one().as_board();
-                        if (rook_attacks(king, state.position.occupied ^ mask) & straight_sliders != 0) {
+                        const mask = from.as_board() | ep_square.down_one().as_board();
+                        if (rook_attacks(king, pos.occupied ^ mask) & straight_sliders != 0) {
                             break;
                         }
                     },
                     Color.black => {
-                        const mask = from | ep_square.down_one().as_board();
-                        if (rook_attacks(king, state.position.occupied ^ mask) & straight_sliders != 0) {
+                        const mask = from.as_board() | ep_square.down_one().as_board();
+                        if (rook_attacks(king, pos.occupied ^ mask) & straight_sliders != 0) {
                             break;
                         }
                     },
                 }
                 try move_list.append(Move{
                     .from = from,
-                    .to = ep_square.as_board(),
-                    .move_type = MoveType.en_passant,
+                    .to = ep_square,
+                    .flags = MoveFlags.en_passant,
                 });
             }
         }
@@ -477,12 +422,11 @@ fn pawn_moves(comptime us: Color, state: GameState, move_list: *ArrayList(Move),
 
 test "generate pinmask" {
     const expectEqual = std.testing.expectEqual;
-    const parse_fen = board.parse_fen;
 
     // contains straight pins, diagonal pins and various setups
     // that look like pins, but actually aren't
-    const state = (try parse_fen("1b6/4P1P1/4r3/rP2K3/8/2P5/8/b7 w - - 0 1")).state;
-    const pins = generate_pinmask(Color.white, state.position);
+    const position = try Position.from_fen("1b6/4P1P1/4r3/rP2K3/8/2P5/8/b7 w - - 0 1");
+    const pins = generate_pinmask(Color.white, position);
 
     try expectEqual(@as(Bitboard, 0x10204080f000000), pins.both);
     try expectEqual(@as(Bitboard, 0xf000000), pins.straight);
@@ -491,50 +435,48 @@ test "generate pinmask" {
 
 test "checkmask generation" {
     const expectEqual = std.testing.expectEqual;
-    const parse_fen = board.parse_fen;
 
     // Simple check, only blocking/capturing the checking piece is allowed
-    const simple = (try parse_fen("8/1q5b/8/5P2/4K3/8/8/8 w - - 0 1")).state;
-    try expectEqual(@as(Bitboard, 0x8040200), generate_checkmask(Color.white, simple.position));
+    const simple = try Position.from_fen("8/1q5b/8/5P2/4K3/8/8/8 w - - 0 1");
+    try expectEqual(@as(Bitboard, 0x8040200), generate_checkmask(Color.white, simple));
 
     // Double check - no moves (except king moves) allowed
-    const double = (try parse_fen("8/8/5q2/8/1p6/2K5/8/8 w - - 0 1")).state;
-    try expectEqual(@as(Bitboard, 0), generate_checkmask(Color.white, double.position));
+    const double = try Position.from_fen("8/8/5q2/8/1p6/2K5/8/8 w - - 0 1");
+    try expectEqual(@as(Bitboard, 0), generate_checkmask(Color.white, double));
 
     // No check, all moves allowed
-    const no_check = (try parse_fen("8/8/8/3K4/8/8/8/8 w - - 0 1")).state;
-    try expectEqual(~@as(Bitboard, 0), generate_checkmask(Color.white, no_check.position));
+    const no_check = try Position.from_fen("8/8/8/3K4/8/8/8/8 w - - 0 1");
+    try expectEqual(~@as(Bitboard, 0), generate_checkmask(Color.white, no_check));
 }
 
 test "en passant" {
     const test_allocator = std.testing.allocator;
     const expect = std.testing.expect;
-    const parse_fen = board.parse_fen;
 
     var move_list = ArrayList(Move).init(test_allocator);
     defer move_list.deinit();
 
     // https://lichess.org/analysis/fromPosition/1K5k/8/8/1Pp5/8/8/8/1r6_w_-_c6_1_1
     // white cannot take en-passant because the pawn is pinned to the king
-    const straight_pin = (try parse_fen("1K5k/8/8/1Pp5/8/8/8/1r6 w - c6 1 1")).state;
+    const straight_pin = try Position.from_fen("1K5k/8/8/1Pp5/8/8/8/1r6 w - c6 1 1");
 
     try generate_moves(Color.white, straight_pin, &move_list);
 
     for (move_list.items) |move| {
-        try expect(move.move_type != MoveType.en_passant);
+        try expect(move.flags != MoveFlags.en_passant);
     }
 
     move_list.clearAndFree();
 
     // https://lichess.org/analysis/fromPosition/4q2k/8/8/1Pp5/K7/8/8/8_w_-_c6_1_1
     // white can take, despite the pawn being pinned
-    const diagonal_pin = (try parse_fen("4q2k/8/8/1Pp5/K7/8/8/8 w - c6 1 1")).state;
+    const diagonal_pin = try Position.from_fen("4q2k/8/8/1Pp5/K7/8/8/8 w - c6 1 1");
 
     try generate_moves(Color.white, diagonal_pin, &move_list);
 
     var found_en_passant = false;
     for (move_list.items) |move| {
-        if (move.move_type == MoveType.en_passant) {
+        if (move.flags == MoveFlags.en_passant) {
             found_en_passant = true;
             break;
         }
@@ -545,11 +487,11 @@ test "en passant" {
 
     // https://lichess.org/analysis/standard/7k/8/8/KPp4r/8/8/8/8_w_-_c6_1_1
     // white cannot take en-passant because that would leave the king check
-    const tricky_pin = (try parse_fen("7k/8/8/KPp4r/8/8/8/8 w - c6 1 1")).state;
+    const tricky_pin = try Position.from_fen("7k/8/8/KPp4r/8/8/8/8 w - c6 1 1");
 
     try generate_moves(Color.white, tricky_pin, &move_list);
 
     for (move_list.items) |move| {
-        try expect(move.move_type != MoveType.en_passant);
+        try expect(move.flags != MoveFlags.en_passant);
     }
 }

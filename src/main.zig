@@ -8,7 +8,7 @@ const bitboard = @import("bitboard.zig");
 
 const board = @import("board.zig");
 const Move = board.Move;
-const GameState = board.GameState;
+const Position = board.Position;
 const Color = board.Color;
 
 const generate_moves = @import("movegen.zig").generate_moves;
@@ -25,23 +25,13 @@ const perft = @import("perft.zig").perft;
 
 const bitops = @import("bitops.zig");
 
-const LOG_FILE = "logs";
+const zobrist = @import("zobrist.zig");
 
 pub fn init() !void {
-    std.fs.cwd().deleteFile(LOG_FILE) catch {}; // if the file doesn't exist, thats fine
-    _ = try std.fs.cwd().createFile(LOG_FILE, .{});
     bitboard.init_magics();
     bitboard.init_paths_between_squares(); // depends on initialized slider attacks
     pesto.init_tables();
-}
-
-pub fn log(comptime message_level: Level, comptime scope: anytype, comptime format: []const u8, args: anytype) void {
-    _ = scope;
-    _ = message_level;
-    const file = std.fs.cwd().openFile(LOG_FILE, .{ .mode = OpenMode.write_only }) catch unreachable;
-    file.seekFromEnd(0) catch unreachable;
-    _ = std.fmt.format(file.writer(), format, args) catch unreachable;
-    file.close();
+    zobrist.init();
 }
 
 pub fn main() !void {
@@ -52,9 +42,9 @@ pub fn main() !void {
     try init();
 
     // will probably be overwritten by "ucinewgame" but it prevents undefined behaviour
-    // just define a default position
+    // to just define a default position
     var active_color = Color.white;
-    var state = GameState.initial();
+    var position = Position.initial();
     mainloop: while (true) {
         const command = try uci.next_command(allocator);
         try switch (command) {
@@ -66,33 +56,30 @@ pub fn main() !void {
             },
             GuiCommand.isready => send_command(EngineCommand.readyok, allocator),
             GuiCommand.debug => {},
-            GuiCommand.newgame => {
-                active_color = Color.white;
-                state = GameState.initial();
-            },
-            GuiCommand.position => |game| {
-                active_color = game.active_color;
-                state = game.state;
-            },
+            GuiCommand.newgame => position = Position.initial(),
+            GuiCommand.position => |new_position| position = new_position,
             GuiCommand.go => {
-                const best_move = try searcher.search(active_color, state, 4, allocator);
+                const best_move = try searcher.search(position, 4, allocator);
                 try send_command(EngineCommand{ .bestmove = best_move }, allocator);
             },
             GuiCommand.stop => {},
-            GuiCommand.board => state.print(),
+            GuiCommand.board => {
+                const stdout = std.io.getStdOut().writer();
+                try position.print(stdout);
+            },
             GuiCommand.eval => {
                 switch (active_color) {
-                    Color.white => std.debug.print("{d} (from white's perspective)\n", .{pesto.evaluate(Color.white, state.position)}),
-                    Color.black => std.debug.print("{d} (from black's perspective)\n", .{pesto.evaluate(Color.black, state.position)}),
+                    Color.white => std.debug.print("{d} (from white's perspective)\n", .{pesto.evaluate(Color.white, position)}),
+                    Color.black => std.debug.print("{d} (from black's perspective)\n", .{pesto.evaluate(Color.black, position)}),
                 }
             },
             GuiCommand.moves => {
                 var move_list = ArrayList(Move).init(allocator);
                 defer move_list.deinit();
 
-                switch (active_color) {
-                    Color.white => try generate_moves(Color.white, state, &move_list),
-                    Color.black => try generate_moves(Color.black, state, &move_list),
+                switch (position.active_color) {
+                    Color.white => try generate_moves(Color.white, position, &move_list),
+                    Color.black => try generate_moves(Color.black, position, &move_list),
                 }
 
                 for (move_list.items) |move| {
@@ -102,7 +89,7 @@ pub fn main() !void {
                 }
             },
             GuiCommand.perft => |depth| {
-                const report = try perft(active_color, state, allocator, @intCast(u8, depth));
+                const report = try perft(position, allocator, @intCast(u8, depth));
                 try send_command(EngineCommand{ .report_perft = report }, allocator);
             },
             GuiCommand.quit => break :mainloop,
