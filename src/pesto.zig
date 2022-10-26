@@ -176,8 +176,8 @@ pub fn init_tables() void {
 }
 
 pub fn evaluate(comptime active_color: Color, position: Position) i32 {
-    const us = @enumToInt(active_color);
-    const them = @enumToInt(active_color.other());
+    const us = comptime @enumToInt(active_color);
+    const them = comptime @enumToInt(active_color.other());
 
     var midgame = [2]i32{ 0, 0 };
     var endgame = [2]i32{ 0, 0 };
@@ -198,7 +198,7 @@ pub fn evaluate(comptime active_color: Color, position: Position) i32 {
         }
     }
 
-    const midgamephase = @minimum(gamephase, 24); // score can exceed 24 in case of promotion
+    const midgamephase = @min(gamephase, 24); // score can exceed 24 in case of promotion
     const endgamephase = 24 - midgamephase;
 
     const midgamescore = midgame[us] - midgame[them];
