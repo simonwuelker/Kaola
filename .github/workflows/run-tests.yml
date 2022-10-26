@@ -10,5 +10,5 @@ jobs:
       - uses: actions/checkout@v2
       - uses: goto-bus-stop/setup-zig@v1
         with:
-          version: 0.10.0-dev.4060+61aaef0b0
+          version: 0.10.0-dev.4563+55c5da1b2
       - run: zig build test
