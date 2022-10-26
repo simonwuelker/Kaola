@@ -1,4 +1,4 @@
-//! Contains regular and magic bitboards 
+//! Contains regular and magic bitboards
 //! as well as attack generation code
 
 const std = @import("std");
@@ -358,8 +358,8 @@ pub fn init_paths_between_squares() void {
                 PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
             }
             // if diagonally aligned (if the absolute difference between their ranks is the same as their files
-            else if (@maximum(source.rank(), target.rank()) - @minimum(source.rank(), target.rank()) ==
-                @maximum(source.file(), target.file()) - @minimum(source.file(), target.file()))
+            else if (@max(source.rank(), target.rank()) - @min(source.rank(), target.rank()) ==
+                @max(source.file(), target.file()) - @min(source.file(), target.file()))
             {
                 PATH_BETWEEN_SQUARES[source_index][target_index] = bishop_attacks(source, blocked) & bishop_attacks(target, blocked);
                 PATH_BETWEEN_SQUARES[source_index][target_index] ^= source.as_board();
